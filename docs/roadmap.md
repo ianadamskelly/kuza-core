@@ -17,8 +17,9 @@
 - Organizations list/create API. Done.
 - Users CRUD.
 - Organization update/delete APIs.
-- Password hashing.
-- Session or JWT authentication.
+- Password hashing. Done.
+- Bearer session authentication. Done.
+- Current user endpoint. Done.
 - Membership checks for every organization-scoped route.
 - Seed script for first owner account. Done.
 

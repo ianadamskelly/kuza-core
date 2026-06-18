@@ -36,10 +36,19 @@ curl http://localhost:8080/v1
 With PostgreSQL configured:
 
 ```sh
+curl -X POST http://localhost:8080/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"owner@example.com","password":"change-me-before-production"}'
+
 curl http://localhost:8080/v1/organizations
+
 curl -X POST http://localhost:8080/v1/organizations \
+  -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
   -d '{"name":"Example School","slug":"example-school","kind":"school"}'
+
+curl http://localhost:8080/v1/auth/me \
+  -H 'Authorization: Bearer <token>'
 ```
 
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
@@ -69,4 +78,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, initial domain schema, PostgreSQL connection, embedded migrations, and first-owner bootstrap. Authentication, persistence APIs, and admin workflows come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, initial domain schema, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, and organization APIs. Broader user management and admin workflows come next.

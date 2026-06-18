@@ -11,6 +11,7 @@ type Config struct {
 	StorageBucket   string
 	StorageAccess   string
 	StorageSecret   string
+	SessionTTLHours int
 	Bootstrap       BootstrapConfig
 }
 
@@ -31,6 +32,7 @@ func Load() Config {
 		StorageBucket:   env("KUZA_CORE_STORAGE_BUCKET", "kuza-core"),
 		StorageAccess:   env("KUZA_CORE_STORAGE_ACCESS_KEY", ""),
 		StorageSecret:   env("KUZA_CORE_STORAGE_SECRET_KEY", ""),
+		SessionTTLHours: envInt("KUZA_CORE_SESSION_TTL_HOURS", 24),
 		Bootstrap: BootstrapConfig{
 			OrganizationName: env("KUZA_CORE_BOOTSTRAP_ORG_NAME", ""),
 			OrganizationSlug: env("KUZA_CORE_BOOTSTRAP_ORG_SLUG", ""),
@@ -46,4 +48,23 @@ func env(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func envInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	var parsed int
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return fallback
+		}
+		parsed = parsed*10 + int(digit-'0')
+	}
+	if parsed == 0 {
+		return fallback
+	}
+	return parsed
 }

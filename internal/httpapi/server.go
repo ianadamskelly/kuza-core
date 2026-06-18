@@ -22,17 +22,24 @@ type OrganizationStore interface {
 	CreateOrganization(context.Context, database.CreateOrganizationParams) (database.Organization, error)
 }
 
+type AuthStore interface {
+	Login(context.Context, database.LoginParams, time.Duration) (database.Session, error)
+	Authenticate(context.Context, string) (database.AuthUser, error)
+}
+
 type Server struct {
 	cfg           config.Config
 	logger        *slog.Logger
 	mux           *http.ServeMux
 	healthChecker HealthChecker
 	orgStore      OrganizationStore
+	authStore     AuthStore
 }
 
 func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	HealthChecker
 	OrganizationStore
+	AuthStore
 }) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -40,9 +47,11 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 
 	var healthChecker HealthChecker
 	var orgStore OrganizationStore
+	var authStore AuthStore
 	if store != nil {
 		healthChecker = store
 		orgStore = store
+		authStore = store
 	}
 
 	server := &Server{
@@ -51,6 +60,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		mux:           http.NewServeMux(),
 		healthChecker: healthChecker,
 		orgStore:      orgStore,
+		authStore:     authStore,
 	}
 	server.routes()
 
@@ -65,6 +75,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /readyz", s.ready)
 	s.mux.HandleFunc("GET /v1", s.index)
+	s.mux.HandleFunc("POST /v1/auth/login", s.login)
+	s.mux.HandleFunc("GET /v1/auth/me", s.me)
 	s.mux.HandleFunc("GET /v1/organizations", s.listOrganizations)
 	s.mux.HandleFunc("POST /v1/organizations", s.createOrganization)
 }
@@ -135,6 +147,15 @@ func (s *Server) listOrganizations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createOrganization(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	if !user.HasRole("owner") {
+		writeError(w, http.StatusForbidden, "owner role required")
+		return
+	}
+
 	if s.orgStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "database not configured")
 		return
@@ -162,6 +183,79 @@ func (s *Server) createOrganization(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, organization)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if s.authStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	var input database.LoginParams
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	session, err := s.authStore.Login(r.Context(), input, time.Duration(s.cfg.SessionTTLHours)*time.Hour)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, database.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "invalid email or password")
+			return
+		}
+		s.logger.Error("login", "error", err)
+		writeError(w, http.StatusInternalServerError, "login")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, session)
+}
+
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) (database.AuthUser, bool) {
+	if s.authStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return database.AuthUser{}, false
+	}
+
+	token := bearerToken(r.Header.Get("Authorization"))
+	if token == "" {
+		writeError(w, http.StatusUnauthorized, "bearer token required")
+		return database.AuthUser{}, false
+	}
+
+	user, err := s.authStore.Authenticate(r.Context(), token)
+	if err != nil {
+		if errors.Is(err, database.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "invalid bearer token")
+			return database.AuthUser{}, false
+		}
+		s.logger.Error("authenticate", "error", err)
+		writeError(w, http.StatusInternalServerError, "authenticate")
+		return database.AuthUser{}, false
+	}
+
+	return user, true
+}
+
+func bearerToken(header string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

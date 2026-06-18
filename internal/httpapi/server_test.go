@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"kuza-core/internal/config"
 	"kuza-core/internal/database"
@@ -18,6 +19,9 @@ type fakeStore struct {
 	pingErr       error
 	organizations []database.Organization
 	createErr     error
+	loginErr      error
+	authErr       error
+	authUser      database.AuthUser
 }
 
 func (store fakeStore) Ping(context.Context) error {
@@ -38,6 +42,23 @@ func (store fakeStore) CreateOrganization(_ context.Context, input database.Crea
 		Slug: input.Slug,
 		Kind: input.Kind,
 	}, nil
+}
+
+func (store fakeStore) Login(_ context.Context, _ database.LoginParams, _ time.Duration) (database.Session, error) {
+	if store.loginErr != nil {
+		return database.Session{}, store.loginErr
+	}
+	return database.Session{
+		Token: "token",
+		User:  store.authUser,
+	}, nil
+}
+
+func (store fakeStore) Authenticate(context.Context, string) (database.AuthUser, error) {
+	if store.authErr != nil {
+		return database.AuthUser{}, store.authErr
+	}
+	return store.authUser, nil
 }
 
 func TestHealth(t *testing.T) {
@@ -141,6 +162,24 @@ func TestListOrganizations(t *testing.T) {
 }
 
 func TestCreateOrganization(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{
+			Memberships: []database.Membership{{Role: "owner"}},
+		},
+	})
+	body := bytes.NewBufferString(`{"name":"Example School","slug":"example-school","kind":"school"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestCreateOrganizationRequiresAuth(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{})
 	body := bytes.NewBufferString(`{"name":"Example School","slug":"example-school","kind":"school"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", body)
@@ -148,7 +187,66 @@ func TestCreateOrganization(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+}
+
+func TestCreateOrganizationRequiresOwner(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{
+			Memberships: []database.Membership{{Role: "admin"}},
+		},
+	})
+	body := bytes.NewBufferString(`{"name":"Example School","slug":"example-school","kind":"school"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestLogin(t *testing.T) {
+	handler := NewServer(config.Config{SessionTTLHours: 24}, slog.Default(), fakeStore{})
+	body := bytes.NewBufferString(`{"email":"owner@example.com","password":"secret"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", body)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestLoginRejectsBadCredentials(t *testing.T) {
+	handler := NewServer(config.Config{SessionTTLHours: 24}, slog.Default(), fakeStore{loginErr: database.ErrUnauthorized})
+	body := bytes.NewBufferString(`{"email":"owner@example.com","password":"wrong"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", body)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+}
+
+func TestMe(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{User: database.User{ID: "user_1", Email: "owner@example.com"}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 }
