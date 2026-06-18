@@ -1,0 +1,48 @@
+services:
+  api:
+    image: golang:1.26
+    working_dir: /workspace
+    command: go run ./cmd/kuzacore
+    ports:
+      - "8080:8080"
+    environment:
+      KUZA_CORE_ENV: development
+      KUZA_CORE_ADDR: :8080
+      KUZA_CORE_DATABASE_URL: postgres://kuza:kuza@postgres:5432/kuza_core?sslmode=disable
+      KUZA_CORE_PUBLIC_URL: http://localhost:8080
+      KUZA_CORE_STORAGE_ENDPOINT: http://minio:9000
+      KUZA_CORE_STORAGE_BUCKET: kuza-core
+      KUZA_CORE_STORAGE_ACCESS_KEY: kuza
+      KUZA_CORE_STORAGE_SECRET_KEY: kuza-secret
+    volumes:
+      - .:/workspace
+    depends_on:
+      - postgres
+      - minio
+
+  postgres:
+    image: postgres:18
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: kuza_core
+      POSTGRES_USER: kuza
+      POSTGRES_PASSWORD: kuza
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: kuza
+      MINIO_ROOT_PASSWORD: kuza-secret
+    volumes:
+      - minio-data:/data
+
+volumes:
+  postgres-data:
+  minio-data:
