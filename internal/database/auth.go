@@ -162,6 +162,29 @@ func (user AuthUser) HasRole(role string) bool {
 	return false
 }
 
+func (user AuthUser) HasOrganizationRole(organizationID string, roles ...string) bool {
+	for _, membership := range user.Memberships {
+		if membership.OrganizationID != organizationID {
+			continue
+		}
+		for _, role := range roles {
+			if membership.Role == role {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (user AuthUser) IsOrganizationMember(organizationID string) bool {
+	for _, membership := range user.Memberships {
+		if membership.OrganizationID == organizationID {
+			return true
+		}
+	}
+	return false
+}
+
 func randomToken() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {

@@ -15,12 +15,13 @@
 
 - Database connection pool. Done.
 - Organizations list/create API. Done.
-- Users CRUD.
+- Users list/create API. Done.
 - Organization update/delete APIs.
 - Password hashing. Done.
 - Bearer session authentication. Done.
 - Current user endpoint. Done.
-- Membership checks for every organization-scoped route.
+- Organization membership list/add APIs. Done.
+- Membership checks for organization member routes. Done.
 - Seed script for first owner account. Done.
 
 ## Phase 2: Product Workflows

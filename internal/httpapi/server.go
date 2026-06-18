@@ -27,6 +27,13 @@ type AuthStore interface {
 	Authenticate(context.Context, string) (database.AuthUser, error)
 }
 
+type UserStore interface {
+	ListUsers(context.Context) ([]database.User, error)
+	CreateUser(context.Context, database.CreateUserParams) (database.User, error)
+	ListOrganizationMembers(context.Context, string) ([]database.OrganizationMember, error)
+	AddMembership(context.Context, string, database.AddMembershipParams) (database.OrganizationMember, error)
+}
+
 type Server struct {
 	cfg           config.Config
 	logger        *slog.Logger
@@ -34,12 +41,14 @@ type Server struct {
 	healthChecker HealthChecker
 	orgStore      OrganizationStore
 	authStore     AuthStore
+	userStore     UserStore
 }
 
 func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	HealthChecker
 	OrganizationStore
 	AuthStore
+	UserStore
 }) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -48,10 +57,12 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	var healthChecker HealthChecker
 	var orgStore OrganizationStore
 	var authStore AuthStore
+	var userStore UserStore
 	if store != nil {
 		healthChecker = store
 		orgStore = store
 		authStore = store
+		userStore = store
 	}
 
 	server := &Server{
@@ -61,6 +72,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		healthChecker: healthChecker,
 		orgStore:      orgStore,
 		authStore:     authStore,
+		userStore:     userStore,
 	}
 	server.routes()
 
@@ -77,8 +89,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1", s.index)
 	s.mux.HandleFunc("POST /v1/auth/login", s.login)
 	s.mux.HandleFunc("GET /v1/auth/me", s.me)
+	s.mux.HandleFunc("GET /v1/users", s.listUsers)
+	s.mux.HandleFunc("POST /v1/users", s.createUser)
 	s.mux.HandleFunc("GET /v1/organizations", s.listOrganizations)
 	s.mux.HandleFunc("POST /v1/organizations", s.createOrganization)
+	s.mux.HandleFunc("GET /v1/organizations/{organizationID}/members", s.listOrganizationMembers)
+	s.mux.HandleFunc("POST /v1/organizations/{organizationID}/members", s.addOrganizationMember)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +238,124 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, user)
+}
+
+func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	if !user.HasRole("owner") {
+		writeError(w, http.StatusForbidden, "owner role required")
+		return
+	}
+	if s.userStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	users, err := s.userStore.ListUsers(r.Context())
+	if err != nil {
+		s.logger.Error("list users", "error", err)
+		writeError(w, http.StatusInternalServerError, "list users")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"users": users})
+}
+
+func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	if !user.HasRole("owner") {
+		writeError(w, http.StatusForbidden, "owner role required")
+		return
+	}
+	if s.userStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	var input database.CreateUserParams
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	created, err := s.userStore.CreateUser(r.Context(), input)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.logger.Error("create user", "error", err)
+		writeError(w, http.StatusInternalServerError, "create user")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) listOrganizationMembers(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	organizationID := r.PathValue("organizationID")
+	if !user.IsOrganizationMember(organizationID) {
+		writeError(w, http.StatusForbidden, "organization membership required")
+		return
+	}
+	if s.userStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	members, err := s.userStore.ListOrganizationMembers(r.Context(), organizationID)
+	if err != nil {
+		s.logger.Error("list organization members", "error", err)
+		writeError(w, http.StatusInternalServerError, "list organization members")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"members": members})
+}
+
+func (s *Server) addOrganizationMember(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	organizationID := r.PathValue("organizationID")
+	if !user.HasOrganizationRole(organizationID, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "organization owner or admin role required")
+		return
+	}
+	if s.userStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	var input database.AddMembershipParams
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	member, err := s.userStore.AddMembership(r.Context(), organizationID, input)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.logger.Error("add organization member", "error", err)
+		writeError(w, http.StatusInternalServerError, "add organization member")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, member)
 }
 
 func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) (database.AuthUser, bool) {

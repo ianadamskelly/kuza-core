@@ -49,6 +49,22 @@ curl -X POST http://localhost:8080/v1/organizations \
 
 curl http://localhost:8080/v1/auth/me \
   -H 'Authorization: Bearer <token>'
+
+curl http://localhost:8080/v1/users \
+  -H 'Authorization: Bearer <token>'
+
+curl -X POST http://localhost:8080/v1/users \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"teacher@example.com","display_name":"Teacher","password":"change-me"}'
+
+curl http://localhost:8080/v1/organizations/<organization-id>/members \
+  -H 'Authorization: Bearer <token>'
+
+curl -X POST http://localhost:8080/v1/organizations/<organization-id>/members \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"<user-id>","role":"teacher"}'
 ```
 
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
@@ -78,4 +94,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, initial domain schema, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, and organization APIs. Broader user management and admin workflows come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, initial domain schema, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, organization APIs, users, and memberships. Learner profiles and admin workflows come next.

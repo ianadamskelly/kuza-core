@@ -22,6 +22,8 @@ type fakeStore struct {
 	loginErr      error
 	authErr       error
 	authUser      database.AuthUser
+	users         []database.User
+	members       []database.OrganizationMember
 }
 
 func (store fakeStore) Ping(context.Context) error {
@@ -59,6 +61,29 @@ func (store fakeStore) Authenticate(context.Context, string) (database.AuthUser,
 		return database.AuthUser{}, store.authErr
 	}
 	return store.authUser, nil
+}
+
+func (store fakeStore) ListUsers(context.Context) ([]database.User, error) {
+	return store.users, nil
+}
+
+func (store fakeStore) CreateUser(_ context.Context, input database.CreateUserParams) (database.User, error) {
+	return database.User{
+		ID:          "user_1",
+		Email:       input.Email,
+		DisplayName: input.DisplayName,
+	}, nil
+}
+
+func (store fakeStore) ListOrganizationMembers(context.Context, string) ([]database.OrganizationMember, error) {
+	return store.members, nil
+}
+
+func (store fakeStore) AddMembership(_ context.Context, _ string, input database.AddMembershipParams) (database.OrganizationMember, error) {
+	return database.OrganizationMember{
+		UserID: input.UserID,
+		Role:   input.Role,
+	}, nil
 }
 
 func TestHealth(t *testing.T) {
@@ -248,5 +273,115 @@ func TestMe(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestListUsersRequiresOwner(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{Role: "admin"}}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestListUsers(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{Role: "owner"}}},
+		users:    []database.User{{ID: "user_1", Email: "owner@example.com", DisplayName: "Owner"}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/users", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestCreateUser(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{Role: "owner"}}},
+	})
+	body := bytes.NewBufferString(`{"email":"teacher@example.com","display_name":"Teacher","password":"secret"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/users", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestListOrganizationMembersRequiresMembership(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{OrganizationID: "org_2", Role: "teacher"}}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/organizations/org_1/members", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestListOrganizationMembers(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{OrganizationID: "org_1", Role: "teacher"}}},
+		members:  []database.OrganizationMember{{UserID: "user_1", Email: "teacher@example.com", Role: "teacher"}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/organizations/org_1/members", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestAddOrganizationMemberRequiresAdmin(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{OrganizationID: "org_1", Role: "teacher"}}},
+	})
+	body := bytes.NewBufferString(`{"user_id":"user_2","role":"teacher"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/organizations/org_1/members", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestAddOrganizationMember(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{OrganizationID: "org_1", Role: "admin"}}},
+	})
+	body := bytes.NewBufferString(`{"user_id":"user_2","role":"teacher"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/organizations/org_1/members", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
 	}
 }
