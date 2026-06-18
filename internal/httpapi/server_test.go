@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,12 +11,33 @@ import (
 	"testing"
 
 	"kuza-core/internal/config"
+	"kuza-core/internal/database"
 )
 
-type healthCheckerFunc func(context.Context) error
+type fakeStore struct {
+	pingErr       error
+	organizations []database.Organization
+	createErr     error
+}
 
-func (fn healthCheckerFunc) Ping(ctx context.Context) error {
-	return fn(ctx)
+func (store fakeStore) Ping(context.Context) error {
+	return store.pingErr
+}
+
+func (store fakeStore) ListOrganizations(context.Context) ([]database.Organization, error) {
+	return store.organizations, nil
+}
+
+func (store fakeStore) CreateOrganization(_ context.Context, input database.CreateOrganizationParams) (database.Organization, error) {
+	if store.createErr != nil {
+		return database.Organization{}, store.createErr
+	}
+	return database.Organization{
+		ID:   "org_1",
+		Name: input.Name,
+		Slug: input.Slug,
+		Kind: input.Kind,
+	}, nil
 }
 
 func TestHealth(t *testing.T) {
@@ -55,9 +77,7 @@ func TestReadyDegradedWithoutDatabaseURL(t *testing.T) {
 }
 
 func TestReadyWithHealthyDatabase(t *testing.T) {
-	handler := NewServer(config.Config{}, slog.Default(), healthCheckerFunc(func(context.Context) error {
-		return nil
-	}))
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{})
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 
@@ -69,9 +89,7 @@ func TestReadyWithHealthyDatabase(t *testing.T) {
 }
 
 func TestReadyWithUnhealthyDatabase(t *testing.T) {
-	handler := NewServer(config.Config{}, slog.Default(), healthCheckerFunc(func(context.Context) error {
-		return errors.New("offline")
-	}))
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{pingErr: errors.New("offline")})
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 
@@ -91,5 +109,46 @@ func TestIndex(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestListOrganizationsRequiresDatabase(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/organizations", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+}
+
+func TestListOrganizations(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		organizations: []database.Organization{
+			{ID: "org_1", Name: "Kuza Kizazi", Slug: "kuza-kizazi", Kind: "school"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/organizations", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestCreateOrganization(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{})
+	body := bytes.NewBufferString(`{"name":"Example School","slug":"example-school","kind":"school"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", body)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
 	}
 }

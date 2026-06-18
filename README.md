@@ -33,6 +33,15 @@ curl http://localhost:8080/readyz
 curl http://localhost:8080/v1
 ```
 
+With PostgreSQL configured:
+
+```sh
+curl http://localhost:8080/v1/organizations
+curl -X POST http://localhost:8080/v1/organizations \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Example School","slug":"example-school","kind":"school"}'
+```
+
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
 
 - `KUZA_CORE_BOOTSTRAP_ORG_NAME`

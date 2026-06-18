@@ -14,7 +14,9 @@
 ## Phase 1: Identity And Tenancy
 
 - Database connection pool. Done.
-- Users and organizations CRUD.
+- Organizations list/create API. Done.
+- Users CRUD.
+- Organization update/delete APIs.
 - Password hashing.
 - Session or JWT authentication.
 - Membership checks for every organization-scoped route.
