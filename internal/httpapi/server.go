@@ -1,28 +1,36 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"kuza-core/internal/config"
 )
 
-type Server struct {
-	cfg    config.Config
-	logger *slog.Logger
-	mux    *http.ServeMux
+type HealthChecker interface {
+	Ping(context.Context) error
 }
 
-func NewServer(cfg config.Config, logger *slog.Logger) http.Handler {
+type Server struct {
+	cfg           config.Config
+	logger        *slog.Logger
+	mux           *http.ServeMux
+	healthChecker HealthChecker
+}
+
+func NewServer(cfg config.Config, logger *slog.Logger, healthChecker HealthChecker) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	server := &Server{
-		cfg:    cfg,
-		logger: logger,
-		mux:    http.NewServeMux(),
+		cfg:           cfg,
+		logger:        logger,
+		mux:           http.NewServeMux(),
+		healthChecker: healthChecker,
 	}
 	server.routes()
 
@@ -47,13 +55,28 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
-	status := "degraded"
-	if s.cfg.DatabaseURL != "" {
-		status = "ready"
+	if s.healthChecker == nil {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "degraded",
+			"reason": "database not configured",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := s.healthChecker.Ping(ctx); err != nil {
+		s.logger.Warn("readiness check failed", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"status": "not_ready",
+			"reason": "database unavailable",
+		})
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"status": status,
+		"status": "ready",
 	})
 }
 

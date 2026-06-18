@@ -11,6 +11,14 @@ type Config struct {
 	StorageBucket   string
 	StorageAccess   string
 	StorageSecret   string
+	Bootstrap       BootstrapConfig
+}
+
+type BootstrapConfig struct {
+	OrganizationName string
+	OrganizationSlug string
+	OwnerEmail       string
+	OwnerPassword    string
 }
 
 func Load() Config {
@@ -23,6 +31,12 @@ func Load() Config {
 		StorageBucket:   env("KUZA_CORE_STORAGE_BUCKET", "kuza-core"),
 		StorageAccess:   env("KUZA_CORE_STORAGE_ACCESS_KEY", ""),
 		StorageSecret:   env("KUZA_CORE_STORAGE_SECRET_KEY", ""),
+		Bootstrap: BootstrapConfig{
+			OrganizationName: env("KUZA_CORE_BOOTSTRAP_ORG_NAME", ""),
+			OrganizationSlug: env("KUZA_CORE_BOOTSTRAP_ORG_SLUG", ""),
+			OwnerEmail:       env("KUZA_CORE_BOOTSTRAP_OWNER_EMAIL", ""),
+			OwnerPassword:    env("KUZA_CORE_BOOTSTRAP_OWNER_PASSWORD", ""),
+		},
 	}
 }
 

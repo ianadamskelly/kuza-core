@@ -2,22 +2,23 @@
 
 ## Phase 0: Foundation
 
-- API service skeleton.
-- Health and readiness endpoints.
-- Environment-backed configuration.
-- Docker Compose for API, PostgreSQL, and MinIO.
-- Initial PostgreSQL schema.
-- Architecture notes.
+- API service skeleton. Done.
+- Health and readiness endpoints. Done.
+- Environment-backed configuration. Done.
+- Docker Compose for API, PostgreSQL, and MinIO. Done.
+- Initial PostgreSQL schema. Done.
+- Embedded migration runner. Done.
+- First owner bootstrap. Done.
+- Architecture notes. Done.
 
 ## Phase 1: Identity And Tenancy
 
-- Migration runner.
-- Database connection pool.
+- Database connection pool. Done.
 - Users and organizations CRUD.
 - Password hashing.
 - Session or JWT authentication.
 - Membership checks for every organization-scoped route.
-- Seed script for first owner account.
+- Seed script for first owner account. Done.
 
 ## Phase 2: Product Workflows
 

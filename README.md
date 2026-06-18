@@ -33,6 +33,13 @@ curl http://localhost:8080/readyz
 curl http://localhost:8080/v1
 ```
 
+If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
+
+- `KUZA_CORE_BOOTSTRAP_ORG_NAME`
+- `KUZA_CORE_BOOTSTRAP_ORG_SLUG`
+- `KUZA_CORE_BOOTSTRAP_OWNER_EMAIL`
+- `KUZA_CORE_BOOTSTRAP_OWNER_PASSWORD`
+
 ## Self-Hosting Shape
 
 ```sh
@@ -53,4 +60,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, and initial domain schema. Authentication, migrations runner, persistence code, and admin workflows come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, initial domain schema, PostgreSQL connection, embedded migrations, and first-owner bootstrap. Authentication, persistence APIs, and admin workflows come next.

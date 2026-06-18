@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"kuza-core/internal/config"
+	"kuza-core/internal/database"
 	"kuza-core/internal/httpapi"
 )
 
@@ -18,9 +19,34 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	cfg := config.Load()
+
+	var db *database.DB
+	if cfg.DatabaseURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		connected, err := database.Connect(ctx, cfg.DatabaseURL)
+		if err != nil {
+			logger.Error("connect database", "error", err)
+			os.Exit(1)
+		}
+		db = connected
+		defer db.Close()
+
+		if err := db.Migrate(ctx); err != nil {
+			logger.Error("run migrations", "error", err)
+			os.Exit(1)
+		}
+
+		if err := db.BootstrapOwner(ctx, cfg.Bootstrap); err != nil {
+			logger.Error("bootstrap owner", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.NewServer(cfg, logger),
+		Handler:           httpapi.NewServer(cfg, logger, db),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
