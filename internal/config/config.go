@@ -16,10 +16,10 @@ type Config struct {
 }
 
 type BootstrapConfig struct {
-	OrganizationName string
-	OrganizationSlug string
-	OwnerEmail       string
-	OwnerPassword    string
+	ProjectName   string
+	ProjectSlug   string
+	OwnerEmail    string
+	OwnerPassword string
 }
 
 func Load() Config {
@@ -34,10 +34,10 @@ func Load() Config {
 		StorageSecret:   env("KUZA_CORE_STORAGE_SECRET_KEY", ""),
 		SessionTTLHours: envInt("KUZA_CORE_SESSION_TTL_HOURS", 24),
 		Bootstrap: BootstrapConfig{
-			OrganizationName: env("KUZA_CORE_BOOTSTRAP_ORG_NAME", ""),
-			OrganizationSlug: env("KUZA_CORE_BOOTSTRAP_ORG_SLUG", ""),
-			OwnerEmail:       env("KUZA_CORE_BOOTSTRAP_OWNER_EMAIL", ""),
-			OwnerPassword:    env("KUZA_CORE_BOOTSTRAP_OWNER_PASSWORD", ""),
+			ProjectName:   env("KUZA_CORE_BOOTSTRAP_PROJECT_NAME", ""),
+			ProjectSlug:   env("KUZA_CORE_BOOTSTRAP_PROJECT_SLUG", ""),
+			OwnerEmail:    env("KUZA_CORE_BOOTSTRAP_OWNER_EMAIL", ""),
+			OwnerPassword: env("KUZA_CORE_BOOTSTRAP_OWNER_PASSWORD", ""),
 		},
 	}
 }

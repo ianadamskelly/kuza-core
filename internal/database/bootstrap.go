@@ -11,11 +11,11 @@ import (
 )
 
 func (db *DB) BootstrapOwner(ctx context.Context, cfg config.BootstrapConfig) error {
-	if cfg.OrganizationName == "" && cfg.OwnerEmail == "" && cfg.OwnerPassword == "" {
+	if cfg.ProjectName == "" && cfg.OwnerEmail == "" && cfg.OwnerPassword == "" {
 		return nil
 	}
-	if cfg.OrganizationName == "" || cfg.OrganizationSlug == "" || cfg.OwnerEmail == "" || cfg.OwnerPassword == "" {
-		return fmt.Errorf("bootstrap requires organization name, organization slug, owner email, and owner password")
+	if cfg.ProjectName == "" || cfg.ProjectSlug == "" || cfg.OwnerEmail == "" || cfg.OwnerPassword == "" {
+		return fmt.Errorf("bootstrap requires project name, project slug, owner email, and owner password")
 	}
 
 	email := strings.ToLower(strings.TrimSpace(cfg.OwnerEmail))
@@ -34,16 +34,16 @@ func (db *DB) BootstrapOwner(ctx context.Context, cfg config.BootstrapConfig) er
 	}
 	defer tx.Rollback(ctx)
 
-	var orgID string
+	var projectID string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO organizations (name, slug)
+		INSERT INTO projects (name, slug)
 		VALUES ($1, $2)
 		ON CONFLICT (slug) DO UPDATE
 		SET name = EXCLUDED.name,
 		    updated_at = now()
 		RETURNING id
-	`, cfg.OrganizationName, cfg.OrganizationSlug).Scan(&orgID); err != nil {
-		return fmt.Errorf("upsert bootstrap organization: %w", err)
+	`, cfg.ProjectName, cfg.ProjectSlug).Scan(&projectID); err != nil {
+		return fmt.Errorf("upsert bootstrap project: %w", err)
 	}
 
 	var userID string
@@ -60,17 +60,17 @@ func (db *DB) BootstrapOwner(ctx context.Context, cfg config.BootstrapConfig) er
 	}
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO memberships (organization_id, user_id, role)
+		INSERT INTO memberships (project_id, user_id, role)
 		VALUES ($1, $2, 'owner')
-		ON CONFLICT (organization_id, user_id, role) DO NOTHING
-	`, orgID, userID); err != nil {
+		ON CONFLICT (project_id, user_id, role) DO NOTHING
+	`, projectID, userID); err != nil {
 		return fmt.Errorf("upsert bootstrap owner membership: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_events (organization_id, actor_user_id, action, target_type, target_id, metadata)
-		VALUES ($1, $2, 'bootstrap.owner', 'organization', $1, jsonb_build_object('owner_email', $3))
-	`, orgID, userID, email); err != nil {
+		INSERT INTO audit_events (project_id, actor_user_id, action, target_type, target_id, metadata)
+		VALUES ($1, $2, 'bootstrap.owner', 'project', $1, jsonb_build_object('owner_email', $3))
+	`, projectID, userID, email); err != nil {
 		return fmt.Errorf("record bootstrap audit event: %w", err)
 	}
 

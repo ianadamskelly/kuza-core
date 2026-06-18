@@ -20,7 +20,7 @@ type AddMembershipParams struct {
 	Role   string `json:"role"`
 }
 
-type OrganizationMember struct {
+type ProjectMember struct {
 	UserID      string    `json:"user_id"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
@@ -84,64 +84,64 @@ func (db *DB) CreateUser(ctx context.Context, input CreateUserParams) (User, err
 	return user, nil
 }
 
-func (db *DB) ListOrganizationMembers(ctx context.Context, organizationID string) ([]OrganizationMember, error) {
+func (db *DB) ListProjectMembers(ctx context.Context, projectID string) ([]ProjectMember, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT users.id, users.email, users.display_name, memberships.role, memberships.created_at
 		FROM memberships
 		JOIN users ON users.id = memberships.user_id
-		WHERE memberships.organization_id = $1
+		WHERE memberships.project_id = $1
 		ORDER BY users.display_name ASC, users.email ASC, memberships.role ASC
-	`, organizationID)
+	`, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("query organization members: %w", err)
+		return nil, fmt.Errorf("query project members: %w", err)
 	}
 	defer rows.Close()
 
-	members := []OrganizationMember{}
+	members := []ProjectMember{}
 	for rows.Next() {
-		var member OrganizationMember
+		var member ProjectMember
 		if err := rows.Scan(&member.UserID, &member.Email, &member.DisplayName, &member.Role, &member.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan organization member: %w", err)
+			return nil, fmt.Errorf("scan project member: %w", err)
 		}
 		members = append(members, member)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate organization members: %w", err)
+		return nil, fmt.Errorf("iterate project members: %w", err)
 	}
 
 	return members, nil
 }
 
-func (db *DB) AddMembership(ctx context.Context, organizationID string, input AddMembershipParams) (OrganizationMember, error) {
+func (db *DB) AddMembership(ctx context.Context, projectID string, input AddMembershipParams) (ProjectMember, error) {
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.Role = strings.TrimSpace(input.Role)
-	if organizationID == "" || input.UserID == "" || input.Role == "" {
-		return OrganizationMember{}, fmt.Errorf("%w: organization id, user_id, and role are required", ErrInvalidInput)
+	if projectID == "" || input.UserID == "" || input.Role == "" {
+		return ProjectMember{}, fmt.Errorf("%w: project id, user_id, and role are required", ErrInvalidInput)
 	}
 	if !validMembershipRole(input.Role) {
-		return OrganizationMember{}, fmt.Errorf("%w: unsupported role", ErrInvalidInput)
+		return ProjectMember{}, fmt.Errorf("%w: unsupported role", ErrInvalidInput)
 	}
 
-	var member OrganizationMember
+	var member ProjectMember
 	if err := db.pool.QueryRow(ctx, `
 		WITH inserted AS (
-			INSERT INTO memberships (organization_id, user_id, role)
+			INSERT INTO memberships (project_id, user_id, role)
 			VALUES ($1, $2, $3)
-			ON CONFLICT (organization_id, user_id, role) DO UPDATE
+			ON CONFLICT (project_id, user_id, role) DO UPDATE
 			SET role = EXCLUDED.role
 			RETURNING user_id, role, created_at
 		)
 		SELECT users.id, users.email, users.display_name, inserted.role, inserted.created_at
 		FROM inserted
 		JOIN users ON users.id = inserted.user_id
-	`, organizationID, input.UserID, input.Role).Scan(
+	`, projectID, input.UserID, input.Role).Scan(
 		&member.UserID,
 		&member.Email,
 		&member.DisplayName,
 		&member.Role,
 		&member.CreatedAt,
 	); err != nil {
-		return OrganizationMember{}, fmt.Errorf("insert membership: %w", err)
+		return ProjectMember{}, fmt.Errorf("insert membership: %w", err)
 	}
 
 	return member, nil
@@ -149,7 +149,7 @@ func (db *DB) AddMembership(ctx context.Context, organizationID string, input Ad
 
 func validMembershipRole(role string) bool {
 	switch role {
-	case "owner", "admin", "teacher", "guardian", "learner":
+	case "owner", "admin", "developer", "member":
 		return true
 	default:
 		return false

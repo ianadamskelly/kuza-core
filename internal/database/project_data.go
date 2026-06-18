@@ -1,0 +1,177 @@
+package database
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+)
+
+type ProjectTable struct {
+	ID        string          `json:"id"`
+	ProjectID string          `json:"project_id"`
+	Name      string          `json:"name"`
+	Schema    json.RawMessage `json:"schema"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+type CreateProjectTableParams struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+}
+
+type ProjectRecord struct {
+	ID              string          `json:"id"`
+	ProjectID       string          `json:"project_id"`
+	TableID         string          `json:"table_id"`
+	Data            json.RawMessage `json:"data"`
+	CreatedByUserID *string         `json:"created_by_user_id,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+type CreateProjectRecordParams struct {
+	Data json.RawMessage `json:"data"`
+}
+
+func (db *DB) ListProjectTables(ctx context.Context, projectID string) ([]ProjectTable, error) {
+	rows, err := db.pool.Query(ctx, `
+		SELECT id, project_id, name, schema, created_at, updated_at
+		FROM project_tables
+		WHERE project_id = $1
+		ORDER BY name ASC
+	`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("query project tables: %w", err)
+	}
+	defer rows.Close()
+
+	tables := []ProjectTable{}
+	for rows.Next() {
+		var table ProjectTable
+		if err := rows.Scan(&table.ID, &table.ProjectID, &table.Name, &table.Schema, &table.CreatedAt, &table.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan project table: %w", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate project tables: %w", err)
+	}
+
+	return tables, nil
+}
+
+func (db *DB) CreateProjectTable(ctx context.Context, projectID string, input CreateProjectTableParams) (ProjectTable, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	if projectID == "" || input.Name == "" {
+		return ProjectTable{}, fmt.Errorf("%w: project id and table name are required", ErrInvalidInput)
+	}
+	if len(input.Schema) == 0 {
+		input.Schema = json.RawMessage(`{}`)
+	}
+	if !json.Valid(input.Schema) {
+		return ProjectTable{}, fmt.Errorf("%w: schema must be valid json", ErrInvalidInput)
+	}
+
+	var table ProjectTable
+	if err := db.pool.QueryRow(ctx, `
+		INSERT INTO project_tables (project_id, name, schema)
+		VALUES ($1, $2, $3)
+		RETURNING id, project_id, name, schema, created_at, updated_at
+	`, projectID, input.Name, input.Schema).Scan(
+		&table.ID,
+		&table.ProjectID,
+		&table.Name,
+		&table.Schema,
+		&table.CreatedAt,
+		&table.UpdatedAt,
+	); err != nil {
+		return ProjectTable{}, fmt.Errorf("insert project table: %w", err)
+	}
+
+	return table, nil
+}
+
+func (db *DB) ListProjectRecords(ctx context.Context, projectID, tableName string) ([]ProjectRecord, error) {
+	rows, err := db.pool.Query(ctx, `
+		SELECT project_records.id,
+		       project_records.project_id,
+		       project_records.table_id,
+		       project_records.data,
+		       project_records.created_by_user_id,
+		       project_records.created_at,
+		       project_records.updated_at
+		FROM project_records
+		JOIN project_tables ON project_tables.id = project_records.table_id
+		WHERE project_records.project_id = $1
+		  AND project_tables.name = $2
+		ORDER BY project_records.created_at DESC
+	`, projectID, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("query project records: %w", err)
+	}
+	defer rows.Close()
+
+	records := []ProjectRecord{}
+	for rows.Next() {
+		var record ProjectRecord
+		if err := rows.Scan(
+			&record.ID,
+			&record.ProjectID,
+			&record.TableID,
+			&record.Data,
+			&record.CreatedByUserID,
+			&record.CreatedAt,
+			&record.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan project record: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate project records: %w", err)
+	}
+
+	return records, nil
+}
+
+func (db *DB) CreateProjectRecord(ctx context.Context, projectID, tableName, createdByUserID string, input CreateProjectRecordParams) (ProjectRecord, error) {
+	tableName = strings.TrimSpace(tableName)
+	if projectID == "" || tableName == "" {
+		return ProjectRecord{}, fmt.Errorf("%w: project id and table name are required", ErrInvalidInput)
+	}
+	if len(input.Data) == 0 {
+		input.Data = json.RawMessage(`{}`)
+	}
+	if !json.Valid(input.Data) {
+		return ProjectRecord{}, fmt.Errorf("%w: data must be valid json", ErrInvalidInput)
+	}
+
+	var record ProjectRecord
+	if err := db.pool.QueryRow(ctx, `
+		WITH table_ref AS (
+			SELECT id
+			FROM project_tables
+			WHERE project_id = $1
+			  AND name = $2
+		)
+		INSERT INTO project_records (project_id, table_id, data, created_by_user_id)
+		SELECT $1, table_ref.id, $3, $4
+		FROM table_ref
+		RETURNING id, project_id, table_id, data, created_by_user_id, created_at, updated_at
+	`, projectID, tableName, input.Data, createdByUserID).Scan(
+		&record.ID,
+		&record.ProjectID,
+		&record.TableID,
+		&record.Data,
+		&record.CreatedByUserID,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	); err != nil {
+		return ProjectRecord{}, fmt.Errorf("insert project record: %w", err)
+	}
+
+	return record, nil
+}

@@ -6,7 +6,6 @@
 - Health and readiness endpoints. Done.
 - Environment-backed configuration. Done.
 - Docker Compose for API, PostgreSQL, and MinIO. Done.
-- Initial PostgreSQL schema. Done.
 - Embedded migration runner. Done.
 - First owner bootstrap. Done.
 - Architecture notes. Done.
@@ -14,22 +13,24 @@
 ## Phase 1: Identity And Tenancy
 
 - Database connection pool. Done.
-- Organizations list/create API. Done.
+- Projects list/create API. Done.
 - Users list/create API. Done.
-- Organization update/delete APIs.
+- Project update/delete APIs.
 - Password hashing. Done.
 - Bearer session authentication. Done.
 - Current user endpoint. Done.
-- Organization membership list/add APIs. Done.
-- Membership checks for organization member routes. Done.
+- Project membership list/add APIs. Done.
+- Membership checks for project member routes. Done.
 - Seed script for first owner account. Done.
 
-## Phase 2: Product Workflows
+## Phase 2: Generic Project Data
 
-- Learner profiles.
-- Guardian relationships.
-- Staff and teacher roles.
-- Content item publishing workflow.
+- Project table definitions. Done.
+- Project JSON records. Done.
+- Record update/delete APIs.
+- Field validation from table schema.
+- API keys for frontend/server integrations.
+- Public/private table access policies.
 - File upload flow using S3-compatible storage.
 - Audit events for sensitive actions.
 
@@ -49,4 +50,4 @@
 - Background jobs.
 - Optional realtime events.
 - Policy engine.
-- Multi-organization admin console.
+- Multi-project admin console.

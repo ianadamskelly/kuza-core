@@ -17,9 +17,9 @@ type HealthChecker interface {
 	Ping(context.Context) error
 }
 
-type OrganizationStore interface {
-	ListOrganizations(context.Context) ([]database.Organization, error)
-	CreateOrganization(context.Context, database.CreateOrganizationParams) (database.Organization, error)
+type ProjectStore interface {
+	ListProjects(context.Context) ([]database.Project, error)
+	CreateProject(context.Context, database.CreateProjectParams) (database.Project, error)
 }
 
 type AuthStore interface {
@@ -30,8 +30,15 @@ type AuthStore interface {
 type UserStore interface {
 	ListUsers(context.Context) ([]database.User, error)
 	CreateUser(context.Context, database.CreateUserParams) (database.User, error)
-	ListOrganizationMembers(context.Context, string) ([]database.OrganizationMember, error)
-	AddMembership(context.Context, string, database.AddMembershipParams) (database.OrganizationMember, error)
+	ListProjectMembers(context.Context, string) ([]database.ProjectMember, error)
+	AddMembership(context.Context, string, database.AddMembershipParams) (database.ProjectMember, error)
+}
+
+type ProjectDataStore interface {
+	ListProjectTables(context.Context, string) ([]database.ProjectTable, error)
+	CreateProjectTable(context.Context, string, database.CreateProjectTableParams) (database.ProjectTable, error)
+	ListProjectRecords(context.Context, string, string) ([]database.ProjectRecord, error)
+	CreateProjectRecord(context.Context, string, string, string, database.CreateProjectRecordParams) (database.ProjectRecord, error)
 }
 
 type Server struct {
@@ -39,30 +46,34 @@ type Server struct {
 	logger        *slog.Logger
 	mux           *http.ServeMux
 	healthChecker HealthChecker
-	orgStore      OrganizationStore
+	projectStore  ProjectStore
 	authStore     AuthStore
 	userStore     UserStore
+	dataStore     ProjectDataStore
 }
 
 func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	HealthChecker
-	OrganizationStore
+	ProjectStore
 	AuthStore
 	UserStore
+	ProjectDataStore
 }) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	var healthChecker HealthChecker
-	var orgStore OrganizationStore
+	var projectStore ProjectStore
 	var authStore AuthStore
 	var userStore UserStore
+	var dataStore ProjectDataStore
 	if store != nil {
 		healthChecker = store
-		orgStore = store
+		projectStore = store
 		authStore = store
 		userStore = store
+		dataStore = store
 	}
 
 	server := &Server{
@@ -70,9 +81,10 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		logger:        logger,
 		mux:           http.NewServeMux(),
 		healthChecker: healthChecker,
-		orgStore:      orgStore,
+		projectStore:  projectStore,
 		authStore:     authStore,
 		userStore:     userStore,
+		dataStore:     dataStore,
 	}
 	server.routes()
 
@@ -91,10 +103,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/auth/me", s.me)
 	s.mux.HandleFunc("GET /v1/users", s.listUsers)
 	s.mux.HandleFunc("POST /v1/users", s.createUser)
-	s.mux.HandleFunc("GET /v1/organizations", s.listOrganizations)
-	s.mux.HandleFunc("POST /v1/organizations", s.createOrganization)
-	s.mux.HandleFunc("GET /v1/organizations/{organizationID}/members", s.listOrganizationMembers)
-	s.mux.HandleFunc("POST /v1/organizations/{organizationID}/members", s.addOrganizationMember)
+	s.mux.HandleFunc("GET /v1/projects", s.listProjects)
+	s.mux.HandleFunc("POST /v1/projects", s.createProject)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/members", s.listProjectMembers)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/members", s.addProjectMember)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/tables", s.listProjectTables)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/tables", s.createProjectTable)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/tables/{tableName}/records", s.listProjectRecords)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/tables/{tableName}/records", s.createProjectRecord)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -136,33 +152,33 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		"version": "v1",
 		"modules": []string{
 			"identity",
-			"schools",
-			"content",
+			"projects",
+			"data",
 			"storage",
 			"audit",
 		},
 	})
 }
 
-func (s *Server) listOrganizations(w http.ResponseWriter, r *http.Request) {
-	if s.orgStore == nil {
+func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
+	if s.projectStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "database not configured")
 		return
 	}
 
-	organizations, err := s.orgStore.ListOrganizations(r.Context())
+	projects, err := s.projectStore.ListProjects(r.Context())
 	if err != nil {
-		s.logger.Error("list organizations", "error", err)
-		writeError(w, http.StatusInternalServerError, "list organizations")
+		s.logger.Error("list projects", "error", err)
+		writeError(w, http.StatusInternalServerError, "list projects")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"organizations": organizations,
+		"projects": projects,
 	})
 }
 
-func (s *Server) createOrganization(w http.ResponseWriter, r *http.Request) {
+func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.requireAuth(w, r)
 	if !ok {
 		return
@@ -172,12 +188,12 @@ func (s *Server) createOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.orgStore == nil {
+	if s.projectStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "database not configured")
 		return
 	}
 
-	var input database.CreateOrganizationParams
+	var input database.CreateProjectParams
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
@@ -185,20 +201,20 @@ func (s *Server) createOrganization(w http.ResponseWriter, r *http.Request) {
 
 	input.Name = strings.TrimSpace(input.Name)
 	input.Slug = strings.TrimSpace(input.Slug)
-	input.Kind = strings.TrimSpace(input.Kind)
+	input.Template = strings.TrimSpace(input.Template)
 
-	organization, err := s.orgStore.CreateOrganization(r.Context(), input)
+	project, err := s.projectStore.CreateProject(r.Context(), input)
 	if err != nil {
 		if errors.Is(err, database.ErrInvalidInput) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		s.logger.Error("create organization", "error", err)
-		writeError(w, http.StatusInternalServerError, "create organization")
+		s.logger.Error("create project", "error", err)
+		writeError(w, http.StatusInternalServerError, "create project")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, organization)
+	writeJSON(w, http.StatusCreated, project)
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -298,14 +314,14 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
-func (s *Server) listOrganizationMembers(w http.ResponseWriter, r *http.Request) {
+func (s *Server) listProjectMembers(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.requireAuth(w, r)
 	if !ok {
 		return
 	}
-	organizationID := r.PathValue("organizationID")
-	if !user.IsOrganizationMember(organizationID) {
-		writeError(w, http.StatusForbidden, "organization membership required")
+	projectID := r.PathValue("projectID")
+	if !user.IsProjectMember(projectID) {
+		writeError(w, http.StatusForbidden, "project membership required")
 		return
 	}
 	if s.userStore == nil {
@@ -313,24 +329,24 @@ func (s *Server) listOrganizationMembers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	members, err := s.userStore.ListOrganizationMembers(r.Context(), organizationID)
+	members, err := s.userStore.ListProjectMembers(r.Context(), projectID)
 	if err != nil {
-		s.logger.Error("list organization members", "error", err)
-		writeError(w, http.StatusInternalServerError, "list organization members")
+		s.logger.Error("list project members", "error", err)
+		writeError(w, http.StatusInternalServerError, "list project members")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"members": members})
 }
 
-func (s *Server) addOrganizationMember(w http.ResponseWriter, r *http.Request) {
+func (s *Server) addProjectMember(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.requireAuth(w, r)
 	if !ok {
 		return
 	}
-	organizationID := r.PathValue("organizationID")
-	if !user.HasOrganizationRole(organizationID, "owner", "admin") {
-		writeError(w, http.StatusForbidden, "organization owner or admin role required")
+	projectID := r.PathValue("projectID")
+	if !user.HasProjectRole(projectID, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "project owner or admin role required")
 		return
 	}
 	if s.userStore == nil {
@@ -344,18 +360,145 @@ func (s *Server) addOrganizationMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	member, err := s.userStore.AddMembership(r.Context(), organizationID, input)
+	member, err := s.userStore.AddMembership(r.Context(), projectID, input)
 	if err != nil {
 		if errors.Is(err, database.ErrInvalidInput) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		s.logger.Error("add organization member", "error", err)
-		writeError(w, http.StatusInternalServerError, "add organization member")
+		s.logger.Error("add project member", "error", err)
+		writeError(w, http.StatusInternalServerError, "add project member")
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, member)
+}
+
+func (s *Server) listProjectTables(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireProjectMember(w, r)
+	if !ok {
+		return
+	}
+	if s.dataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	tables, err := s.dataStore.ListProjectTables(r.Context(), r.PathValue("projectID"))
+	if err != nil {
+		s.logger.Error("list project tables", "error", err)
+		writeError(w, http.StatusInternalServerError, "list project tables")
+		return
+	}
+	_ = user
+
+	writeJSON(w, http.StatusOK, map[string]any{"tables": tables})
+}
+
+func (s *Server) createProjectTable(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireProjectRole(w, r, "owner", "admin", "developer")
+	if !ok {
+		return
+	}
+	if s.dataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	var input database.CreateProjectTableParams
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	table, err := s.dataStore.CreateProjectTable(r.Context(), r.PathValue("projectID"), input)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.logger.Error("create project table", "error", err)
+		writeError(w, http.StatusInternalServerError, "create project table")
+		return
+	}
+	_ = user
+
+	writeJSON(w, http.StatusCreated, table)
+}
+
+func (s *Server) listProjectRecords(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireProjectMember(w, r)
+	if !ok {
+		return
+	}
+	if s.dataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	records, err := s.dataStore.ListProjectRecords(r.Context(), r.PathValue("projectID"), r.PathValue("tableName"))
+	if err != nil {
+		s.logger.Error("list project records", "error", err)
+		writeError(w, http.StatusInternalServerError, "list project records")
+		return
+	}
+	_ = user
+
+	writeJSON(w, http.StatusOK, map[string]any{"records": records})
+}
+
+func (s *Server) createProjectRecord(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireProjectMember(w, r)
+	if !ok {
+		return
+	}
+	if s.dataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	var input database.CreateProjectRecordParams
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	record, err := s.dataStore.CreateProjectRecord(r.Context(), r.PathValue("projectID"), r.PathValue("tableName"), user.User.ID, input)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.logger.Error("create project record", "error", err)
+		writeError(w, http.StatusInternalServerError, "create project record")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, record)
+}
+
+func (s *Server) requireProjectMember(w http.ResponseWriter, r *http.Request) (database.AuthUser, bool) {
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return database.AuthUser{}, false
+	}
+	if !user.IsProjectMember(r.PathValue("projectID")) {
+		writeError(w, http.StatusForbidden, "project membership required")
+		return database.AuthUser{}, false
+	}
+	return user, true
+}
+
+func (s *Server) requireProjectRole(w http.ResponseWriter, r *http.Request, roles ...string) (database.AuthUser, bool) {
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return database.AuthUser{}, false
+	}
+	if !user.HasProjectRole(r.PathValue("projectID"), roles...) {
+		writeError(w, http.StatusForbidden, "project role required")
+		return database.AuthUser{}, false
+	}
+	return user, true
 }
 
 func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) (database.AuthUser, bool) {

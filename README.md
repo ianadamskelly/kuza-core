@@ -1,16 +1,16 @@
 # Kuza Core
 
-Kuza Core is the self-hostable backend foundation for Kuza Kizazi.
+Kuza Core is a self-hostable backend platform for building many kinds of apps without rebuilding backend plumbing each time.
 
-The first version is intentionally product-specific: schools, communities, learners, guardians, staff, content, files, and audit trails. The foundations are kept clean so it can later grow into a reusable education platform without forcing platform complexity into day one.
+Create a project, define the data tables that project needs, connect a frontend, and run the backend yourself. A CV builder, school app, jobs board, directory, or internal tool should all be able to use the same Kuza Core foundation.
 
 ## Goals
 
 - Own the core data and deployment path.
 - Run locally or on a small VPS with Docker.
 - Keep PostgreSQL as the source of truth.
-- Make auth, roles, files, audits, and operational tools first-class.
-- Grow toward platform capabilities only after the product workflows are stable.
+- Make projects, auth, roles, files, audits, and operational tools first-class.
+- Provide generic project data APIs so each frontend can bring its own domain model.
 
 ## First Services
 
@@ -40,12 +40,12 @@ curl -X POST http://localhost:8080/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"owner@example.com","password":"change-me-before-production"}'
 
-curl http://localhost:8080/v1/organizations
+curl http://localhost:8080/v1/projects
 
-curl -X POST http://localhost:8080/v1/organizations \
+curl -X POST http://localhost:8080/v1/projects \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
-  -d '{"name":"Example School","slug":"example-school","kind":"school"}'
+  -d '{"name":"CV Builder","slug":"cv-builder","template":"blank"}'
 
 curl http://localhost:8080/v1/auth/me \
   -H 'Authorization: Bearer <token>'
@@ -56,21 +56,34 @@ curl http://localhost:8080/v1/users \
 curl -X POST http://localhost:8080/v1/users \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
-  -d '{"email":"teacher@example.com","display_name":"Teacher","password":"change-me"}'
+  -d '{"email":"builder@example.com","display_name":"Builder","password":"change-me"}'
 
-curl http://localhost:8080/v1/organizations/<organization-id>/members \
+curl http://localhost:8080/v1/projects/<project-id>/members \
   -H 'Authorization: Bearer <token>'
 
-curl -X POST http://localhost:8080/v1/organizations/<organization-id>/members \
+curl -X POST http://localhost:8080/v1/projects/<project-id>/members \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
-  -d '{"user_id":"<user-id>","role":"teacher"}'
+  -d '{"user_id":"<user-id>","role":"developer"}'
+
+curl -X POST http://localhost:8080/v1/projects/<project-id>/tables \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"profiles","schema":{"fields":{"name":"text","headline":"text"}}}'
+
+curl -X POST http://localhost:8080/v1/projects/<project-id>/tables/profiles/records \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"name":"Ian","headline":"Educator"}}'
+
+curl http://localhost:8080/v1/projects/<project-id>/tables/profiles/records \
+  -H 'Authorization: Bearer <token>'
 ```
 
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
 
-- `KUZA_CORE_BOOTSTRAP_ORG_NAME`
-- `KUZA_CORE_BOOTSTRAP_ORG_SLUG`
+- `KUZA_CORE_BOOTSTRAP_PROJECT_NAME`
+- `KUZA_CORE_BOOTSTRAP_PROJECT_SLUG`
 - `KUZA_CORE_BOOTSTRAP_OWNER_EMAIL`
 - `KUZA_CORE_BOOTSTRAP_OWNER_PASSWORD`
 
@@ -94,4 +107,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, initial domain schema, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, organization APIs, users, and memberships. Learner profiles and admin workflows come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, and generic project data tables/records. Storage, API keys, and finer permissions come next.

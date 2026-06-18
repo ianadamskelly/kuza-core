@@ -1,36 +1,37 @@
 # Kuza Core Architecture
 
-## Product-Specific First
+## Backend Platform First
 
-Kuza Core starts as the backend for Kuza Kizazi, not as a generic backend-as-a-service clone. The platform boundary should emerge from repeated product needs.
+Kuza Core is a self-hostable backend platform. It should let a frontend spin up a backend instance, create a project, define project data, and start building without writing a custom backend for every app.
 
-The first domain modules are:
+The first platform modules are:
 
 - Identity: users, sessions, roles, memberships.
-- Schools and organizations: the tenant boundary for data ownership.
-- Learners and guardians: education-specific relationships.
-- Content: lessons, resources, media, and publishing workflows.
+- Projects: the app and tenant boundary for data ownership.
+- Project data: generic tables and JSON records owned by a project.
 - Storage: S3-compatible file metadata and object storage.
 - Audit: trace important changes and admin activity.
 
-## Platform Later
+## Product Templates Later
 
-The platform path is still protected by a few early choices:
+School systems, CV builders, jobs boards, directories, and other apps should become templates or starter kits on top of Kuza Core. They should not be hardcoded into the core schema.
+
+The platform path is protected by a few early choices:
 
 - PostgreSQL is the source of truth.
-- Every product record belongs to a clear organization boundary where appropriate.
-- Domain APIs sit in front of the database instead of exposing raw tables directly.
+- Every app record belongs to a project boundary.
+- Generic project APIs sit in front of the database.
 - Storage is S3-compatible so local MinIO and hosted object stores are interchangeable.
 - Operational concerns like audit logs, backups, and health checks are built early.
 
 ## Non-Goals For The First Version
 
-- Generic table editor.
 - Full Supabase-compatible APIs.
 - Realtime subscriptions for every table.
 - Plugin marketplace.
 - Multi-cloud orchestration.
 - Complex policy UI.
+- App-specific tables in the core schema.
 
 ## Initial Runtime
 
@@ -49,7 +50,7 @@ Background workers, queues, search, and realtime can be added as the workflows d
 ## Design Principles
 
 - Keep business rules in application code until a database policy clearly earns its place.
-- Prefer explicit product APIs over generic database exposure.
+- Prefer explicit project APIs over raw database exposure.
 - Make local development and self-hosting obvious.
 - Keep deployment small enough for one VPS.
-- Add platform abstractions only when the product has repeated the same need twice.
+- Add platform abstractions when multiple app types need the same capability.

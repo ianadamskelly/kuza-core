@@ -16,33 +16,35 @@ import (
 )
 
 type fakeStore struct {
-	pingErr       error
-	organizations []database.Organization
-	createErr     error
-	loginErr      error
-	authErr       error
-	authUser      database.AuthUser
-	users         []database.User
-	members       []database.OrganizationMember
+	pingErr   error
+	projects  []database.Project
+	createErr error
+	loginErr  error
+	authErr   error
+	authUser  database.AuthUser
+	users     []database.User
+	members   []database.ProjectMember
+	tables    []database.ProjectTable
+	records   []database.ProjectRecord
 }
 
 func (store fakeStore) Ping(context.Context) error {
 	return store.pingErr
 }
 
-func (store fakeStore) ListOrganizations(context.Context) ([]database.Organization, error) {
-	return store.organizations, nil
+func (store fakeStore) ListProjects(context.Context) ([]database.Project, error) {
+	return store.projects, nil
 }
 
-func (store fakeStore) CreateOrganization(_ context.Context, input database.CreateOrganizationParams) (database.Organization, error) {
+func (store fakeStore) CreateProject(_ context.Context, input database.CreateProjectParams) (database.Project, error) {
 	if store.createErr != nil {
-		return database.Organization{}, store.createErr
+		return database.Project{}, store.createErr
 	}
-	return database.Organization{
-		ID:   "org_1",
-		Name: input.Name,
-		Slug: input.Slug,
-		Kind: input.Kind,
+	return database.Project{
+		ID:       "project_1",
+		Name:     input.Name,
+		Slug:     input.Slug,
+		Template: input.Template,
 	}, nil
 }
 
@@ -75,14 +77,41 @@ func (store fakeStore) CreateUser(_ context.Context, input database.CreateUserPa
 	}, nil
 }
 
-func (store fakeStore) ListOrganizationMembers(context.Context, string) ([]database.OrganizationMember, error) {
+func (store fakeStore) ListProjectMembers(context.Context, string) ([]database.ProjectMember, error) {
 	return store.members, nil
 }
 
-func (store fakeStore) AddMembership(_ context.Context, _ string, input database.AddMembershipParams) (database.OrganizationMember, error) {
-	return database.OrganizationMember{
+func (store fakeStore) AddMembership(_ context.Context, _ string, input database.AddMembershipParams) (database.ProjectMember, error) {
+	return database.ProjectMember{
 		UserID: input.UserID,
 		Role:   input.Role,
+	}, nil
+}
+
+func (store fakeStore) ListProjectTables(context.Context, string) ([]database.ProjectTable, error) {
+	return store.tables, nil
+}
+
+func (store fakeStore) CreateProjectTable(_ context.Context, projectID string, input database.CreateProjectTableParams) (database.ProjectTable, error) {
+	return database.ProjectTable{
+		ID:        "table_1",
+		ProjectID: projectID,
+		Name:      input.Name,
+		Schema:    input.Schema,
+	}, nil
+}
+
+func (store fakeStore) ListProjectRecords(context.Context, string, string) ([]database.ProjectRecord, error) {
+	return store.records, nil
+}
+
+func (store fakeStore) CreateProjectRecord(_ context.Context, projectID, _ string, createdByUserID string, input database.CreateProjectRecordParams) (database.ProjectRecord, error) {
+	return database.ProjectRecord{
+		ID:              "record_1",
+		ProjectID:       projectID,
+		TableID:         "table_1",
+		Data:            input.Data,
+		CreatedByUserID: &createdByUserID,
 	}, nil
 }
 
@@ -158,9 +187,9 @@ func TestIndex(t *testing.T) {
 	}
 }
 
-func TestListOrganizationsRequiresDatabase(t *testing.T) {
+func TestListProjectsRequiresDatabase(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), nil)
-	req := httptest.NewRequest(http.MethodGet, "/v1/organizations", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -170,13 +199,13 @@ func TestListOrganizationsRequiresDatabase(t *testing.T) {
 	}
 }
 
-func TestListOrganizations(t *testing.T) {
+func TestListProjects(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
-		organizations: []database.Organization{
-			{ID: "org_1", Name: "Kuza Kizazi", Slug: "kuza-kizazi", Kind: "school"},
+		projects: []database.Project{
+			{ID: "project_1", Name: "CV Builder", Slug: "cv-builder", Template: "blank"},
 		},
 	})
-	req := httptest.NewRequest(http.MethodGet, "/v1/organizations", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -186,14 +215,14 @@ func TestListOrganizations(t *testing.T) {
 	}
 }
 
-func TestCreateOrganization(t *testing.T) {
+func TestCreateProject(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
 		authUser: database.AuthUser{
 			Memberships: []database.Membership{{Role: "owner"}},
 		},
 	})
-	body := bytes.NewBufferString(`{"name":"Example School","slug":"example-school","kind":"school"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", body)
+	body := bytes.NewBufferString(`{"name":"CV Builder","slug":"cv-builder","template":"blank"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects", body)
 	req.Header.Set("Authorization", "Bearer token")
 	rec := httptest.NewRecorder()
 
@@ -204,10 +233,10 @@ func TestCreateOrganization(t *testing.T) {
 	}
 }
 
-func TestCreateOrganizationRequiresAuth(t *testing.T) {
+func TestCreateProjectRequiresAuth(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{})
-	body := bytes.NewBufferString(`{"name":"Example School","slug":"example-school","kind":"school"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", body)
+	body := bytes.NewBufferString(`{"name":"CV Builder","slug":"cv-builder","template":"blank"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects", body)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -217,14 +246,14 @@ func TestCreateOrganizationRequiresAuth(t *testing.T) {
 	}
 }
 
-func TestCreateOrganizationRequiresOwner(t *testing.T) {
+func TestCreateProjectRequiresOwner(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
 		authUser: database.AuthUser{
 			Memberships: []database.Membership{{Role: "admin"}},
 		},
 	})
-	body := bytes.NewBufferString(`{"name":"Example School","slug":"example-school","kind":"school"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", body)
+	body := bytes.NewBufferString(`{"name":"CV Builder","slug":"cv-builder","template":"blank"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects", body)
 	req.Header.Set("Authorization", "Bearer token")
 	rec := httptest.NewRecorder()
 
@@ -311,7 +340,7 @@ func TestCreateUser(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
 		authUser: database.AuthUser{Memberships: []database.Membership{{Role: "owner"}}},
 	})
-	body := bytes.NewBufferString(`{"email":"teacher@example.com","display_name":"Teacher","password":"secret"}`)
+	body := bytes.NewBufferString(`{"email":"builder@example.com","display_name":"Builder","password":"secret"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/users", body)
 	req.Header.Set("Authorization", "Bearer token")
 	rec := httptest.NewRecorder()
@@ -323,11 +352,11 @@ func TestCreateUser(t *testing.T) {
 	}
 }
 
-func TestListOrganizationMembersRequiresMembership(t *testing.T) {
+func TestListProjectMembersRequiresMembership(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
-		authUser: database.AuthUser{Memberships: []database.Membership{{OrganizationID: "org_2", Role: "teacher"}}},
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_2", Role: "developer"}}},
 	})
-	req := httptest.NewRequest(http.MethodGet, "/v1/organizations/org_1/members", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/members", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	rec := httptest.NewRecorder()
 
@@ -338,12 +367,12 @@ func TestListOrganizationMembersRequiresMembership(t *testing.T) {
 	}
 }
 
-func TestListOrganizationMembers(t *testing.T) {
+func TestListProjectMembers(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
-		authUser: database.AuthUser{Memberships: []database.Membership{{OrganizationID: "org_1", Role: "teacher"}}},
-		members:  []database.OrganizationMember{{UserID: "user_1", Email: "teacher@example.com", Role: "teacher"}},
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "developer"}}},
+		members:  []database.ProjectMember{{UserID: "user_1", Email: "builder@example.com", Role: "developer"}},
 	})
-	req := httptest.NewRequest(http.MethodGet, "/v1/organizations/org_1/members", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/members", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	rec := httptest.NewRecorder()
 
@@ -354,12 +383,12 @@ func TestListOrganizationMembers(t *testing.T) {
 	}
 }
 
-func TestAddOrganizationMemberRequiresAdmin(t *testing.T) {
+func TestAddProjectMemberRequiresAdmin(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
-		authUser: database.AuthUser{Memberships: []database.Membership{{OrganizationID: "org_1", Role: "teacher"}}},
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "developer"}}},
 	})
-	body := bytes.NewBufferString(`{"user_id":"user_2","role":"teacher"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/organizations/org_1/members", body)
+	body := bytes.NewBufferString(`{"user_id":"user_2","role":"developer"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/members", body)
 	req.Header.Set("Authorization", "Bearer token")
 	rec := httptest.NewRecorder()
 
@@ -370,12 +399,92 @@ func TestAddOrganizationMemberRequiresAdmin(t *testing.T) {
 	}
 }
 
-func TestAddOrganizationMember(t *testing.T) {
+func TestAddProjectMember(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
-		authUser: database.AuthUser{Memberships: []database.Membership{{OrganizationID: "org_1", Role: "admin"}}},
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "admin"}}},
 	})
-	body := bytes.NewBufferString(`{"user_id":"user_2","role":"teacher"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/organizations/org_1/members", body)
+	body := bytes.NewBufferString(`{"user_id":"user_2","role":"developer"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/members", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestListProjectTables(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+		tables:   []database.ProjectTable{{ID: "table_1", ProjectID: "project_1", Name: "profiles"}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/tables", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestCreateProjectTableRequiresDeveloper(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+	})
+	body := bytes.NewBufferString(`{"name":"profiles","schema":{"fields":{"name":"text"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/tables", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestCreateProjectTable(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "developer"}}},
+	})
+	body := bytes.NewBufferString(`{"name":"profiles","schema":{"fields":{"name":"text"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/tables", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestListProjectRecords(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{User: database.User{ID: "user_1"}, Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+		records:  []database.ProjectRecord{{ID: "record_1", ProjectID: "project_1", TableID: "table_1"}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/tables/profiles/records", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestCreateProjectRecord(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{User: database.User{ID: "user_1"}, Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+	})
+	body := bytes.NewBufferString(`{"data":{"name":"Ian","headline":"Educator"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/tables/profiles/records", body)
 	req.Header.Set("Authorization", "Bearer token")
 	rec := httptest.NewRecorder()
 

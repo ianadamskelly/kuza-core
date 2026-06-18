@@ -25,8 +25,8 @@ type User struct {
 }
 
 type Membership struct {
-	OrganizationID string `json:"organization_id"`
-	Role           string `json:"role"`
+	ProjectID string `json:"project_id"`
+	Role      string `json:"role"`
 }
 
 type AuthUser struct {
@@ -128,7 +128,7 @@ func (db *DB) Authenticate(ctx context.Context, token string) (AuthUser, error) 
 
 func (db *DB) authUser(ctx context.Context, user User) (AuthUser, error) {
 	rows, err := db.pool.Query(ctx, `
-		SELECT organization_id, role
+		SELECT project_id, role
 		FROM memberships
 		WHERE user_id = $1
 		ORDER BY created_at ASC
@@ -141,7 +141,7 @@ func (db *DB) authUser(ctx context.Context, user User) (AuthUser, error) {
 	authUser := AuthUser{User: user, Memberships: []Membership{}}
 	for rows.Next() {
 		var membership Membership
-		if err := rows.Scan(&membership.OrganizationID, &membership.Role); err != nil {
+		if err := rows.Scan(&membership.ProjectID, &membership.Role); err != nil {
 			return AuthUser{}, fmt.Errorf("scan membership: %w", err)
 		}
 		authUser.Memberships = append(authUser.Memberships, membership)
@@ -162,9 +162,9 @@ func (user AuthUser) HasRole(role string) bool {
 	return false
 }
 
-func (user AuthUser) HasOrganizationRole(organizationID string, roles ...string) bool {
+func (user AuthUser) HasProjectRole(projectID string, roles ...string) bool {
 	for _, membership := range user.Memberships {
-		if membership.OrganizationID != organizationID {
+		if membership.ProjectID != projectID {
 			continue
 		}
 		for _, role := range roles {
@@ -176,9 +176,9 @@ func (user AuthUser) HasOrganizationRole(organizationID string, roles ...string)
 	return false
 }
 
-func (user AuthUser) IsOrganizationMember(organizationID string) bool {
+func (user AuthUser) IsProjectMember(projectID string) bool {
 	for _, membership := range user.Memberships {
-		if membership.OrganizationID == organizationID {
+		if membership.ProjectID == projectID {
 			return true
 		}
 	}
