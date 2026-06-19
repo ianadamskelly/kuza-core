@@ -91,6 +91,14 @@ curl -X PATCH http://localhost:8080/v1/projects/<project-id>/tables/profiles/rec
 
 curl -X DELETE http://localhost:8080/v1/projects/<project-id>/tables/profiles/records/<record-id> \
   -H 'X-Kuza-API-Key: <api-key>'
+
+curl -X POST http://localhost:8080/v1/projects/<project-id>/files \
+  -H 'X-Kuza-API-Key: <api-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{"file_name":"cv.pdf","mime_type":"application/pdf","byte_size":2048,"access":"api_key"}'
+
+curl http://localhost:8080/v1/projects/<project-id>/files \
+  -H 'Authorization: Bearer <token>'
 ```
 
 Project table access policies are:
@@ -103,6 +111,12 @@ Project table schemas currently support:
 
 - `required`: list of required field names.
 - `fields`: map of field names to simple types: `text`, `number`, `boolean`, `object`, or `array`.
+
+Project file access policies use the same vocabulary:
+
+- `project_members`
+- `api_key`
+- `public`
 
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
 
@@ -131,4 +145,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, generic project data tables/records, record update/delete, and basic schema validation. Storage and richer permissions come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, generic project data tables/records, record update/delete, basic schema validation, and project-scoped file metadata/upload intents. Object proxying/presigning and richer permissions come next.

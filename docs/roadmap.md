@@ -31,7 +31,8 @@
 - Basic table read/write access policies. Done.
 - Record update/delete APIs. Done.
 - Basic field validation from table schema. Done.
-- File upload flow using S3-compatible storage.
+- Project file metadata and upload intents. Done.
+- S3/MinIO object proxying or presigned URLs.
 - Audit events for sensitive actions.
 
 ## Phase 3: Operations

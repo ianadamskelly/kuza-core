@@ -50,6 +50,12 @@ type ProjectAPIKeyStore interface {
 	CreateProjectAPIKey(context.Context, string, string, database.CreateProjectAPIKeyParams) (database.CreatedProjectAPIKey, error)
 }
 
+type StorageStore interface {
+	ListFiles(context.Context, string) ([]database.File, error)
+	CreateFileIntent(context.Context, string, string, string, string, database.CreateFileIntentParams) (database.FileIntent, error)
+	GetFile(context.Context, string, string) (database.File, error)
+}
+
 type Server struct {
 	cfg           config.Config
 	logger        *slog.Logger
@@ -60,6 +66,7 @@ type Server struct {
 	userStore     UserStore
 	dataStore     ProjectDataStore
 	apiKeyStore   ProjectAPIKeyStore
+	storageStore  StorageStore
 }
 
 func NewServer(cfg config.Config, logger *slog.Logger, store interface {
@@ -69,6 +76,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	UserStore
 	ProjectDataStore
 	ProjectAPIKeyStore
+	StorageStore
 }) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -80,6 +88,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	var userStore UserStore
 	var dataStore ProjectDataStore
 	var apiKeyStore ProjectAPIKeyStore
+	var storageStore StorageStore
 	if store != nil {
 		healthChecker = store
 		projectStore = store
@@ -87,6 +96,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		userStore = store
 		dataStore = store
 		apiKeyStore = store
+		storageStore = store
 	}
 
 	server := &Server{
@@ -99,6 +109,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		userStore:     userStore,
 		dataStore:     dataStore,
 		apiKeyStore:   apiKeyStore,
+		storageStore:  storageStore,
 	}
 	server.routes()
 
@@ -129,6 +140,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/tables/{tableName}/records", s.createProjectRecord)
 	s.mux.HandleFunc("PATCH /v1/projects/{projectID}/tables/{tableName}/records/{recordID}", s.updateProjectRecord)
 	s.mux.HandleFunc("DELETE /v1/projects/{projectID}/tables/{tableName}/records/{recordID}", s.deleteProjectRecord)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/files", s.listFiles)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/files", s.createFileIntent)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/files/{fileID}", s.getFile)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -595,6 +609,76 @@ func (s *Server) deleteProjectRecord(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireProjectMember(w, r)
+	if !ok {
+		return
+	}
+	if s.storageStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	files, err := s.storageStore.ListFiles(r.Context(), r.PathValue("projectID"))
+	if err != nil {
+		s.logger.Error("list files", "error", err)
+		writeError(w, http.StatusInternalServerError, "list files")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+}
+
+func (s *Server) createFileIntent(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireProjectActor(w, r)
+	if !ok {
+		return
+	}
+	if s.storageStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	var input database.CreateFileIntentParams
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	intent, err := s.storageStore.CreateFileIntent(r.Context(), r.PathValue("projectID"), actor.userID, s.cfg.StorageBucket, s.cfg.PublicURL, input)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.logger.Error("create file intent", "error", err)
+		writeError(w, http.StatusInternalServerError, "create file intent")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, intent)
+}
+
+func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireProjectMember(w, r)
+	if !ok {
+		return
+	}
+	if s.storageStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	file, err := s.storageStore.GetFile(r.Context(), r.PathValue("projectID"), r.PathValue("fileID"))
+	if err != nil {
+		s.logger.Error("get file", "error", err)
+		writeError(w, http.StatusInternalServerError, "get file")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, file)
+}
+
 type tableActor struct {
 	userID string
 }
@@ -648,6 +732,31 @@ func (s *Server) requireTableActor(w http.ResponseWriter, r *http.Request, opera
 		return tableActor{}, false
 	}
 
+	return tableActor{userID: user.User.ID}, true
+}
+
+func (s *Server) requireProjectActor(w http.ResponseWriter, r *http.Request) (tableActor, bool) {
+	projectID := r.PathValue("projectID")
+	if token := apiKeyToken(r); token != "" {
+		key, ok := s.authenticateProjectAPIKey(w, r, token)
+		if !ok {
+			return tableActor{}, false
+		}
+		if key.ProjectID != projectID {
+			writeError(w, http.StatusForbidden, "api key is not scoped to this project")
+			return tableActor{}, false
+		}
+		return tableActor{}, true
+	}
+
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return tableActor{}, false
+	}
+	if !user.IsProjectMember(projectID) {
+		writeError(w, http.StatusForbidden, "project membership required")
+		return tableActor{}, false
+	}
 	return tableActor{userID: user.User.ID}, true
 }
 

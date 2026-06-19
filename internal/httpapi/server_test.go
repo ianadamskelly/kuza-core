@@ -28,6 +28,7 @@ type fakeStore struct {
 	records   []database.ProjectRecord
 	apiKeys   []database.ProjectAPIKey
 	access    database.ProjectTableAccess
+	files     []database.File
 }
 
 func (store fakeStore) Ping(context.Context) error {
@@ -162,6 +163,39 @@ func (store fakeStore) CreateProjectAPIKey(_ context.Context, projectID, created
 		},
 		Token: "token",
 	}, nil
+}
+
+func (store fakeStore) ListFiles(context.Context, string) ([]database.File, error) {
+	return store.files, nil
+}
+
+func (store fakeStore) CreateFileIntent(_ context.Context, projectID, ownerUserID, bucket, _ string, input database.CreateFileIntentParams) (database.FileIntent, error) {
+	owner := &ownerUserID
+	if ownerUserID == "" {
+		owner = nil
+	}
+	file := database.File{
+		ID:          "file_1",
+		ProjectID:   projectID,
+		OwnerUserID: owner,
+		Bucket:      bucket,
+		ObjectKey:   "projects/project_1/file.pdf",
+		FileName:    input.FileName,
+		MimeType:    input.MimeType,
+		ByteSize:    input.ByteSize,
+		Access:      input.Access,
+	}
+	return database.FileIntent{
+		File: file,
+		Upload: database.StorageOperation{
+			Method: "PUT",
+			URL:    "http://localhost:8080/upload",
+		},
+	}, nil
+}
+
+func (store fakeStore) GetFile(context.Context, string, string) (database.File, error) {
+	return database.File{ID: "file_1", ProjectID: "project_1", FileName: "file.pdf"}, nil
 }
 
 func TestHealth(t *testing.T) {
@@ -637,5 +671,66 @@ func TestListProjectRecordsRejectsAPIKeyForMemberPolicy(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+}
+
+func TestListFiles(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+		files:    []database.File{{ID: "file_1", ProjectID: "project_1", FileName: "cv.pdf"}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/files", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestCreateFileIntentWithSession(t *testing.T) {
+	handler := NewServer(config.Config{StorageBucket: "kuza-core", PublicURL: "http://localhost:8080"}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{User: database.User{ID: "user_1"}, Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+	})
+	body := bytes.NewBufferString(`{"file_name":"cv.pdf","mime_type":"application/pdf","byte_size":2048,"access":"api_key"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/files", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestCreateFileIntentWithAPIKey(t *testing.T) {
+	handler := NewServer(config.Config{StorageBucket: "kuza-core", PublicURL: "http://localhost:8080"}, slog.Default(), fakeStore{})
+	body := bytes.NewBufferString(`{"file_name":"avatar.png","mime_type":"image/png","byte_size":1024,"access":"public"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/files", body)
+	req.Header.Set("X-Kuza-API-Key", "key")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestGetFile(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/files/file_1", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 }

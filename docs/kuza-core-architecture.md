@@ -12,7 +12,7 @@ The first platform modules are:
 - Project API keys: frontend/server keys scoped to a single project.
 - Table policies: `project_members`, `api_key`, or `public` access for reads/writes.
 - Table schemas: lightweight validation for required fields and simple JSON types.
-- Storage: S3-compatible file metadata and object storage.
+- Storage: S3-compatible file metadata and upload/download intent flow.
 - Audit: trace important changes and admin activity.
 
 ## Product Templates Later
