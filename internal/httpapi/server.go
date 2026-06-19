@@ -56,6 +56,11 @@ type StorageStore interface {
 	GetFile(context.Context, string, string) (database.File, error)
 }
 
+type ObjectSigner interface {
+	PresignUpload(context.Context, database.File) (database.StorageOperation, error)
+	PresignDownload(context.Context, database.File) (database.StorageOperation, error)
+}
+
 type Server struct {
 	cfg           config.Config
 	logger        *slog.Logger
@@ -67,6 +72,7 @@ type Server struct {
 	dataStore     ProjectDataStore
 	apiKeyStore   ProjectAPIKeyStore
 	storageStore  StorageStore
+	objectSigner  ObjectSigner
 }
 
 func NewServer(cfg config.Config, logger *slog.Logger, store interface {
@@ -77,7 +83,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	ProjectDataStore
 	ProjectAPIKeyStore
 	StorageStore
-}) http.Handler {
+}, objectSigners ...ObjectSigner) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -110,6 +116,9 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		dataStore:     dataStore,
 		apiKeyStore:   apiKeyStore,
 		storageStore:  storageStore,
+	}
+	if len(objectSigners) > 0 {
+		server.objectSigner = objectSigners[0]
 	}
 	server.routes()
 
@@ -655,6 +664,11 @@ func (s *Server) createFileIntent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "create file intent")
 		return
 	}
+	if err := s.signFileIntent(r.Context(), &intent); err != nil {
+		s.logger.Error("sign file intent", "error", err)
+		writeError(w, http.StatusInternalServerError, "sign file intent")
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, intent)
 }
@@ -677,6 +691,24 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, file)
+}
+
+func (s *Server) signFileIntent(ctx context.Context, intent *database.FileIntent) error {
+	if s.objectSigner == nil {
+		return nil
+	}
+
+	upload, err := s.objectSigner.PresignUpload(ctx, intent.File)
+	if err != nil {
+		return err
+	}
+	download, err := s.objectSigner.PresignDownload(ctx, intent.File)
+	if err != nil {
+		return err
+	}
+	intent.Upload = upload
+	intent.Download = download
+	return nil
 }
 
 type tableActor struct {

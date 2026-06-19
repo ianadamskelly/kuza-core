@@ -31,6 +31,16 @@ type fakeStore struct {
 	files     []database.File
 }
 
+type fakeObjectSigner struct{}
+
+func (fakeObjectSigner) PresignUpload(context.Context, database.File) (database.StorageOperation, error) {
+	return database.StorageOperation{Method: "PUT", URL: "https://storage.example/upload"}, nil
+}
+
+func (fakeObjectSigner) PresignDownload(context.Context, database.File) (database.StorageOperation, error) {
+	return database.StorageOperation{Method: "GET", URL: "https://storage.example/download"}, nil
+}
+
 func (store fakeStore) Ping(context.Context) error {
 	return store.pingErr
 }
@@ -703,6 +713,32 @@ func TestCreateFileIntentWithSession(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestCreateFileIntentUsesObjectSigner(t *testing.T) {
+	handler := NewServer(config.Config{StorageBucket: "kuza-core", PublicURL: "http://localhost:8080"}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{User: database.User{ID: "user_1"}, Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+	}, fakeObjectSigner{})
+	body := bytes.NewBufferString(`{"file_name":"cv.pdf","mime_type":"application/pdf","byte_size":2048,"access":"api_key"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/files", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+
+	var bodyJSON struct {
+		Upload database.StorageOperation `json:"upload"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &bodyJSON); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if bodyJSON.Upload.URL != "https://storage.example/upload" {
+		t.Fatalf("expected signed upload URL, got %q", bodyJSON.Upload.URL)
 	}
 }
 

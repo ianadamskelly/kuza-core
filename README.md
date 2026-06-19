@@ -118,6 +118,8 @@ Project file access policies use the same vocabulary:
 - `api_key`
 - `public`
 
+When `KUZA_CORE_STORAGE_ENDPOINT`, `KUZA_CORE_STORAGE_ACCESS_KEY`, and `KUZA_CORE_STORAGE_SECRET_KEY` are configured, file intents return S3-compatible presigned upload/download URLs. Without those values, Kuza Core returns local API-shaped fallback URLs for development.
+
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
 
 - `KUZA_CORE_BOOTSTRAP_PROJECT_NAME`
@@ -145,4 +147,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, generic project data tables/records, record update/delete, basic schema validation, and project-scoped file metadata/upload intents. Object proxying/presigning and richer permissions come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, generic project data tables/records, record update/delete, basic schema validation, project-scoped file metadata, and S3-compatible presigned upload/download intents. Object proxying, audits, and richer permissions come next.

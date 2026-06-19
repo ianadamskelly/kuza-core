@@ -13,6 +13,7 @@ import (
 	"kuza-core/internal/config"
 	"kuza-core/internal/database"
 	"kuza-core/internal/httpapi"
+	"kuza-core/internal/objectstore"
 )
 
 func main() {
@@ -44,9 +45,15 @@ func main() {
 		}
 	}
 
+	objectSigner, err := objectstore.New(cfg.StorageEndpoint, cfg.StorageAccess, cfg.StorageSecret)
+	if err != nil {
+		logger.Error("configure object storage", "error", err)
+		os.Exit(1)
+	}
+
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.NewServer(cfg, logger, db),
+		Handler:           httpapi.NewServer(cfg, logger, db, objectSigner),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
