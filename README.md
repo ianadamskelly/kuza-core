@@ -99,6 +99,9 @@ curl -X POST http://localhost:8080/v1/projects/<project-id>/files \
 
 curl http://localhost:8080/v1/projects/<project-id>/files \
   -H 'Authorization: Bearer <token>'
+
+curl http://localhost:8080/v1/projects/<project-id>/audit-events \
+  -H 'Authorization: Bearer <token>'
 ```
 
 Project table access policies are:
@@ -119,6 +122,8 @@ Project file access policies use the same vocabulary:
 - `public`
 
 When `KUZA_CORE_STORAGE_ENDPOINT`, `KUZA_CORE_STORAGE_ACCESS_KEY`, and `KUZA_CORE_STORAGE_SECRET_KEY` are configured, file intents return S3-compatible presigned upload/download URLs. Without those values, Kuza Core returns local API-shaped fallback URLs for development.
+
+Audit events are recorded for sensitive platform actions including project creation, membership changes, API key creation, table creation, record writes/deletes, and file upload intents.
 
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
 
@@ -147,4 +152,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, generic project data tables/records, record update/delete, basic schema validation, project-scoped file metadata, and S3-compatible presigned upload/download intents. Object proxying, audits, and richer permissions come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, generic project data tables/records, record update/delete, basic schema validation, project-scoped file metadata, S3-compatible presigned upload/download intents, and audit logging. Object proxying and richer permissions come next.

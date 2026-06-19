@@ -13,7 +13,7 @@ The first platform modules are:
 - Table policies: `project_members`, `api_key`, or `public` access for reads/writes.
 - Table schemas: lightweight validation for required fields and simple JSON types.
 - Storage: S3-compatible file metadata and presigned upload/download intent flow.
-- Audit: trace important changes and admin activity.
+- Audit: trace sensitive platform changes and admin activity.
 
 ## Product Templates Later
 
@@ -26,6 +26,7 @@ The platform path is protected by a few early choices:
 - Generic project APIs sit in front of the database.
 - Frontends use project API keys instead of human owner session tokens.
 - Storage is S3-compatible so local Garage and hosted object stores are interchangeable.
+- Sensitive actions write project-scoped audit events.
 - Operational concerns like audit logs, backups, and health checks are built early.
 
 ## Non-Goals For The First Version

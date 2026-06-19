@@ -56,6 +56,11 @@ type StorageStore interface {
 	GetFile(context.Context, string, string) (database.File, error)
 }
 
+type AuditStore interface {
+	CreateAuditEvent(context.Context, database.CreateAuditEventParams) error
+	ListAuditEvents(context.Context, string) ([]database.AuditEvent, error)
+}
+
 type ObjectSigner interface {
 	PresignUpload(context.Context, database.File) (database.StorageOperation, error)
 	PresignDownload(context.Context, database.File) (database.StorageOperation, error)
@@ -72,6 +77,7 @@ type Server struct {
 	dataStore     ProjectDataStore
 	apiKeyStore   ProjectAPIKeyStore
 	storageStore  StorageStore
+	auditStore    AuditStore
 	objectSigner  ObjectSigner
 }
 
@@ -83,6 +89,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	ProjectDataStore
 	ProjectAPIKeyStore
 	StorageStore
+	AuditStore
 }, objectSigners ...ObjectSigner) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -95,6 +102,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	var dataStore ProjectDataStore
 	var apiKeyStore ProjectAPIKeyStore
 	var storageStore StorageStore
+	var auditStore AuditStore
 	if store != nil {
 		healthChecker = store
 		projectStore = store
@@ -103,6 +111,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		dataStore = store
 		apiKeyStore = store
 		storageStore = store
+		auditStore = store
 	}
 
 	server := &Server{
@@ -116,6 +125,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		dataStore:     dataStore,
 		apiKeyStore:   apiKeyStore,
 		storageStore:  storageStore,
+		auditStore:    auditStore,
 	}
 	if len(objectSigners) > 0 {
 		server.objectSigner = objectSigners[0]
@@ -152,6 +162,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/files", s.listFiles)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/files", s.createFileIntent)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/files/{fileID}", s.getFile)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/audit-events", s.listAuditEvents)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -254,6 +265,18 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "create project")
 		return
 	}
+	s.recordAudit(r.Context(), database.CreateAuditEventParams{
+		ProjectID:   project.ID,
+		ActorUserID: user.User.ID,
+		Action:      "project.create",
+		TargetType:  "project",
+		TargetID:    project.ID,
+		Metadata: map[string]any{
+			"name":     project.Name,
+			"slug":     project.Slug,
+			"template": project.Template,
+		},
+	})
 
 	writeJSON(w, http.StatusCreated, project)
 }
@@ -411,6 +434,18 @@ func (s *Server) addProjectMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "add project member")
 		return
 	}
+	s.recordAudit(r.Context(), database.CreateAuditEventParams{
+		ProjectID:   projectID,
+		ActorUserID: user.User.ID,
+		Action:      "membership.add",
+		TargetType:  "membership",
+		TargetID:    member.UserID,
+		Metadata: map[string]any{
+			"user_id": member.UserID,
+			"email":   member.Email,
+			"role":    member.Role,
+		},
+	})
 
 	writeJSON(w, http.StatusCreated, member)
 }
@@ -461,6 +496,17 @@ func (s *Server) createProjectAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "create project api key")
 		return
 	}
+	s.recordAudit(r.Context(), database.CreateAuditEventParams{
+		ProjectID:   r.PathValue("projectID"),
+		ActorUserID: user.User.ID,
+		Action:      "api_key.create",
+		TargetType:  "api_key",
+		TargetID:    key.ID,
+		Metadata: map[string]any{
+			"name":         key.Name,
+			"token_prefix": key.TokenPrefix,
+		},
+	})
 
 	writeJSON(w, http.StatusCreated, key)
 }
@@ -486,7 +532,7 @@ func (s *Server) listProjectTables(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createProjectTable(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireProjectRole(w, r, "owner", "admin", "developer")
+	user, ok := s.requireProjectRole(w, r, "owner", "admin", "developer")
 	if !ok {
 		return
 	}
@@ -511,6 +557,18 @@ func (s *Server) createProjectTable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "create project table")
 		return
 	}
+	s.recordAudit(r.Context(), database.CreateAuditEventParams{
+		ProjectID:   r.PathValue("projectID"),
+		ActorUserID: user.User.ID,
+		Action:      "table.create",
+		TargetType:  "project_table",
+		TargetID:    table.ID,
+		Metadata: map[string]any{
+			"name":         table.Name,
+			"read_access":  table.ReadAccess,
+			"write_access": table.WriteAccess,
+		},
+	})
 
 	writeJSON(w, http.StatusCreated, table)
 }
@@ -561,12 +619,22 @@ func (s *Server) createProjectRecord(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "create project record")
 		return
 	}
+	s.recordAudit(r.Context(), database.CreateAuditEventParams{
+		ProjectID:   r.PathValue("projectID"),
+		ActorUserID: actor.userID,
+		Action:      "record.create",
+		TargetType:  "project_record",
+		TargetID:    record.ID,
+		Metadata: map[string]any{
+			"table": r.PathValue("tableName"),
+		},
+	})
 
 	writeJSON(w, http.StatusCreated, record)
 }
 
 func (s *Server) updateProjectRecord(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireTableActor(w, r, "write")
+	actor, ok := s.requireTableActor(w, r, "write")
 	if !ok {
 		return
 	}
@@ -591,12 +659,22 @@ func (s *Server) updateProjectRecord(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "update project record")
 		return
 	}
+	s.recordAudit(r.Context(), database.CreateAuditEventParams{
+		ProjectID:   r.PathValue("projectID"),
+		ActorUserID: actor.userID,
+		Action:      "record.update",
+		TargetType:  "project_record",
+		TargetID:    record.ID,
+		Metadata: map[string]any{
+			"table": r.PathValue("tableName"),
+		},
+	})
 
 	writeJSON(w, http.StatusOK, record)
 }
 
 func (s *Server) deleteProjectRecord(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireTableActor(w, r, "write")
+	actor, ok := s.requireTableActor(w, r, "write")
 	if !ok {
 		return
 	}
@@ -614,6 +692,16 @@ func (s *Server) deleteProjectRecord(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "delete project record")
 		return
 	}
+	s.recordAudit(r.Context(), database.CreateAuditEventParams{
+		ProjectID:   r.PathValue("projectID"),
+		ActorUserID: actor.userID,
+		Action:      "record.delete",
+		TargetType:  "project_record",
+		TargetID:    r.PathValue("recordID"),
+		Metadata: map[string]any{
+			"table": r.PathValue("tableName"),
+		},
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -669,6 +757,20 @@ func (s *Server) createFileIntent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "sign file intent")
 		return
 	}
+	s.recordAudit(r.Context(), database.CreateAuditEventParams{
+		ProjectID:   r.PathValue("projectID"),
+		ActorUserID: actor.userID,
+		Action:      "file.intent.create",
+		TargetType:  "file",
+		TargetID:    intent.File.ID,
+		Metadata: map[string]any{
+			"file_name":  intent.File.FileName,
+			"mime_type":  intent.File.MimeType,
+			"byte_size":  intent.File.ByteSize,
+			"access":     intent.File.Access,
+			"object_key": intent.File.ObjectKey,
+		},
+	})
 
 	writeJSON(w, http.StatusCreated, intent)
 }
@@ -693,6 +795,26 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, file)
 }
 
+func (s *Server) listAuditEvents(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireProjectRole(w, r, "owner", "admin", "developer")
+	if !ok {
+		return
+	}
+	if s.auditStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	events, err := s.auditStore.ListAuditEvents(r.Context(), r.PathValue("projectID"))
+	if err != nil {
+		s.logger.Error("list audit events", "error", err)
+		writeError(w, http.StatusInternalServerError, "list audit events")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"audit_events": events})
+}
+
 func (s *Server) signFileIntent(ctx context.Context, intent *database.FileIntent) error {
 	if s.objectSigner == nil {
 		return nil
@@ -709,6 +831,15 @@ func (s *Server) signFileIntent(ctx context.Context, intent *database.FileIntent
 	intent.Upload = upload
 	intent.Download = download
 	return nil
+}
+
+func (s *Server) recordAudit(ctx context.Context, input database.CreateAuditEventParams) {
+	if s.auditStore == nil {
+		return
+	}
+	if err := s.auditStore.CreateAuditEvent(ctx, input); err != nil {
+		s.logger.Error("record audit event", "error", err, "action", input.Action)
+	}
 }
 
 type tableActor struct {

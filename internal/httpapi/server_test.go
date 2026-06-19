@@ -29,6 +29,7 @@ type fakeStore struct {
 	apiKeys   []database.ProjectAPIKey
 	access    database.ProjectTableAccess
 	files     []database.File
+	audits    []database.AuditEvent
 }
 
 type fakeObjectSigner struct{}
@@ -206,6 +207,14 @@ func (store fakeStore) CreateFileIntent(_ context.Context, projectID, ownerUserI
 
 func (store fakeStore) GetFile(context.Context, string, string) (database.File, error) {
 	return database.File{ID: "file_1", ProjectID: "project_1", FileName: "file.pdf"}, nil
+}
+
+func (store fakeStore) CreateAuditEvent(context.Context, database.CreateAuditEventParams) error {
+	return nil
+}
+
+func (store fakeStore) ListAuditEvents(context.Context, string) ([]database.AuditEvent, error) {
+	return store.audits, nil
 }
 
 func TestHealth(t *testing.T) {
@@ -761,6 +770,22 @@ func TestGetFile(t *testing.T) {
 		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/files/file_1", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestListAuditEvents(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "developer"}}},
+		audits:   []database.AuditEvent{{ID: "audit_1", Action: "record.create", TargetType: "project_record"}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/audit-events", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	rec := httptest.NewRecorder()
 

@@ -34,7 +34,7 @@
 - Project file metadata and upload intents. Done.
 - S3-compatible presigned URLs. Done.
 - Optional object proxying for deployments that do not expose object storage directly.
-- Audit events for sensitive actions.
+- Audit events for sensitive actions. Done.
 
 ## Phase 3: Operations
 
