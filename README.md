@@ -16,7 +16,7 @@ Create a project, define the data tables that project needs, connect a frontend,
 
 - `api`: Kuza Core HTTP API.
 - `postgres`: relational database.
-- `minio`: S3-compatible local object storage.
+- `garage`: S3-compatible local object storage.
 
 ## Local Development
 
@@ -133,7 +133,7 @@ If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedde
 docker compose up
 ```
 
-This starts the API, PostgreSQL, and MinIO. The compose file is a development baseline, not yet a hardened production profile.
+This starts the API, PostgreSQL, and Garage. The compose file is a development baseline, not yet a hardened production profile.
 
 ## Project Layout
 

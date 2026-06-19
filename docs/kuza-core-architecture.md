@@ -25,7 +25,7 @@ The platform path is protected by a few early choices:
 - Every app record belongs to a project boundary.
 - Generic project APIs sit in front of the database.
 - Frontends use project API keys instead of human owner session tokens.
-- Storage is S3-compatible so local MinIO and hosted object stores are interchangeable.
+- Storage is S3-compatible so local Garage and hosted object stores are interchangeable.
 - Operational concerns like audit logs, backups, and health checks are built early.
 
 ## Non-Goals For The First Version

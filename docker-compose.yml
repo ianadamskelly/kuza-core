@@ -10,9 +10,9 @@ services:
       KUZA_CORE_ADDR: :8080
       KUZA_CORE_DATABASE_URL: postgres://kuza:kuza@postgres:5432/kuza_core?sslmode=disable
       KUZA_CORE_PUBLIC_URL: http://localhost:8080
-      KUZA_CORE_STORAGE_ENDPOINT: http://minio:9000
+      KUZA_CORE_STORAGE_ENDPOINT: http://garage:3900
       KUZA_CORE_STORAGE_BUCKET: kuza-core
-      KUZA_CORE_STORAGE_ACCESS_KEY: kuza
+      KUZA_CORE_STORAGE_ACCESS_KEY: GKkuza
       KUZA_CORE_STORAGE_SECRET_KEY: kuza-secret
       KUZA_CORE_SESSION_TTL_HOURS: 24
       KUZA_CORE_BOOTSTRAP_PROJECT_NAME: Kuza Core Demo
@@ -23,7 +23,7 @@ services:
       - .:/workspace
     depends_on:
       - postgres
-      - minio
+      - garage
 
   postgres:
     image: postgres:18
@@ -36,18 +36,22 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  garage:
+    image: dxflrs/garage:v2.3.0
+    command: /garage server --single-node --default-bucket
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "3900:3900"
+      - "3901:3901"
+      - "3902:3902"
+      - "3903:3903"
     environment:
-      MINIO_ROOT_USER: kuza
-      MINIO_ROOT_PASSWORD: kuza-secret
+      GARAGE_DEFAULT_ACCESS_KEY: GKkuza
+      GARAGE_DEFAULT_SECRET_KEY: kuza-secret
+      GARAGE_DEFAULT_BUCKET: kuza-core
     volumes:
-      - minio-data:/data
+      - ./infra/garage/garage.toml:/etc/garage.toml
+      - garage-data:/var/lib/garage
 
 volumes:
   postgres-data:
-  minio-data:
+  garage-data:

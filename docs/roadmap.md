@@ -32,7 +32,7 @@
 - Record update/delete APIs. Done.
 - Basic field validation from table schema. Done.
 - Project file metadata and upload intents. Done.
-- S3/MinIO presigned URLs. Done.
+- S3-compatible presigned URLs. Done.
 - Optional object proxying for deployments that do not expose object storage directly.
 - Audit events for sensitive actions.
 

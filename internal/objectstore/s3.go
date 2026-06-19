@@ -13,6 +13,8 @@ import (
 	"kuza-core/internal/database"
 )
 
+// Signer uses the MinIO Go client as a generic S3-compatible signer.
+// It works with Garage, MinIO, AWS S3, and other compatible object stores.
 type Signer struct {
 	client *minio.Client
 	expiry time.Duration
