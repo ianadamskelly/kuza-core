@@ -27,10 +27,10 @@
 
 - Project table definitions. Done.
 - Project JSON records. Done.
+- Project API keys. Done.
+- Basic table read/write access policies. Done.
 - Record update/delete APIs.
 - Field validation from table schema.
-- API keys for frontend/server integrations.
-- Public/private table access policies.
 - File upload flow using S3-compatible storage.
 - Audit events for sensitive actions.
 

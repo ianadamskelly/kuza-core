@@ -66,19 +66,30 @@ curl -X POST http://localhost:8080/v1/projects/<project-id>/members \
   -H 'Content-Type: application/json' \
   -d '{"user_id":"<user-id>","role":"developer"}'
 
+curl -X POST http://localhost:8080/v1/projects/<project-id>/api-keys \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Frontend client"}'
+
 curl -X POST http://localhost:8080/v1/projects/<project-id>/tables \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
-  -d '{"name":"profiles","schema":{"fields":{"name":"text","headline":"text"}}}'
+  -d '{"name":"profiles","read_access":"api_key","write_access":"api_key","schema":{"fields":{"name":"text","headline":"text"}}}'
 
 curl -X POST http://localhost:8080/v1/projects/<project-id>/tables/profiles/records \
-  -H 'Authorization: Bearer <token>' \
+  -H 'X-Kuza-API-Key: <api-key>' \
   -H 'Content-Type: application/json' \
   -d '{"data":{"name":"Ian","headline":"Educator"}}'
 
 curl http://localhost:8080/v1/projects/<project-id>/tables/profiles/records \
-  -H 'Authorization: Bearer <token>'
+  -H 'X-Kuza-API-Key: <api-key>'
 ```
+
+Project table access policies are:
+
+- `project_members`: project members only.
+- `api_key`: project members or a project API key.
+- `public`: no token required.
 
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
 
@@ -107,4 +118,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, and generic project data tables/records. Storage, API keys, and finer permissions come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, and generic project data tables/records. Storage and finer validation come next.

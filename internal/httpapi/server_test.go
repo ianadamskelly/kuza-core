@@ -26,6 +26,8 @@ type fakeStore struct {
 	members   []database.ProjectMember
 	tables    []database.ProjectTable
 	records   []database.ProjectRecord
+	apiKeys   []database.ProjectAPIKey
+	access    database.ProjectTableAccess
 }
 
 func (store fakeStore) Ping(context.Context) error {
@@ -65,6 +67,13 @@ func (store fakeStore) Authenticate(context.Context, string) (database.AuthUser,
 	return store.authUser, nil
 }
 
+func (store fakeStore) AuthenticateProjectAPIKey(context.Context, string) (database.ProjectAPIKey, error) {
+	if store.authErr != nil {
+		return database.ProjectAPIKey{}, store.authErr
+	}
+	return database.ProjectAPIKey{ID: "key_1", ProjectID: "project_1", Name: "Client"}, nil
+}
+
 func (store fakeStore) ListUsers(context.Context) ([]database.User, error) {
 	return store.users, nil
 }
@@ -101,6 +110,16 @@ func (store fakeStore) CreateProjectTable(_ context.Context, projectID string, i
 	}, nil
 }
 
+func (store fakeStore) GetProjectTableAccess(context.Context, string, string) (database.ProjectTableAccess, error) {
+	if store.access.ReadAccess != "" || store.access.WriteAccess != "" {
+		return store.access, nil
+	}
+	return database.ProjectTableAccess{
+		ReadAccess:  "project_members",
+		WriteAccess: "project_members",
+	}, nil
+}
+
 func (store fakeStore) ListProjectRecords(context.Context, string, string) ([]database.ProjectRecord, error) {
 	return store.records, nil
 }
@@ -112,6 +131,23 @@ func (store fakeStore) CreateProjectRecord(_ context.Context, projectID, _ strin
 		TableID:         "table_1",
 		Data:            input.Data,
 		CreatedByUserID: &createdByUserID,
+	}, nil
+}
+
+func (store fakeStore) ListProjectAPIKeys(context.Context, string) ([]database.ProjectAPIKey, error) {
+	return store.apiKeys, nil
+}
+
+func (store fakeStore) CreateProjectAPIKey(_ context.Context, projectID, createdByUserID string, input database.CreateProjectAPIKeyParams) (database.CreatedProjectAPIKey, error) {
+	return database.CreatedProjectAPIKey{
+		ProjectAPIKey: database.ProjectAPIKey{
+			ID:              "key_1",
+			ProjectID:       projectID,
+			Name:            input.Name,
+			TokenPrefix:     "abc123",
+			CreatedByUserID: &createdByUserID,
+		},
+		Token: "token",
 	}, nil
 }
 
@@ -415,6 +451,41 @@ func TestAddProjectMember(t *testing.T) {
 	}
 }
 
+func TestListProjectAPIKeys(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "developer"}}},
+		apiKeys:  []database.ProjectAPIKey{{ID: "key_1", ProjectID: "project_1", Name: "Client"}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/api-keys", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestCreateProjectAPIKey(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{
+			User:        database.User{ID: "user_1"},
+			Memberships: []database.Membership{{ProjectID: "project_1", Role: "developer"}},
+		},
+	})
+	body := bytes.NewBufferString(`{"name":"Client"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/project_1/api-keys", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
 func TestListProjectTables(t *testing.T) {
 	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
 		authUser: database.AuthUser{Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
@@ -492,5 +563,35 @@ func TestCreateProjectRecord(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestListProjectRecordsWithAPIKeyPolicy(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		access: database.ProjectTableAccess{ReadAccess: "api_key", WriteAccess: "api_key"},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/tables/profiles/records", nil)
+	req.Header.Set("X-Kuza-API-Key", "key")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestListProjectRecordsRejectsAPIKeyForMemberPolicy(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		access: database.ProjectTableAccess{ReadAccess: "project_members", WriteAccess: "project_members"},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/projects/project_1/tables/profiles/records", nil)
+	req.Header.Set("X-Kuza-API-Key", "key")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
 	}
 }

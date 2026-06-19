@@ -25,6 +25,7 @@ type ProjectStore interface {
 type AuthStore interface {
 	Login(context.Context, database.LoginParams, time.Duration) (database.Session, error)
 	Authenticate(context.Context, string) (database.AuthUser, error)
+	AuthenticateProjectAPIKey(context.Context, string) (database.ProjectAPIKey, error)
 }
 
 type UserStore interface {
@@ -37,8 +38,14 @@ type UserStore interface {
 type ProjectDataStore interface {
 	ListProjectTables(context.Context, string) ([]database.ProjectTable, error)
 	CreateProjectTable(context.Context, string, database.CreateProjectTableParams) (database.ProjectTable, error)
+	GetProjectTableAccess(context.Context, string, string) (database.ProjectTableAccess, error)
 	ListProjectRecords(context.Context, string, string) ([]database.ProjectRecord, error)
 	CreateProjectRecord(context.Context, string, string, string, database.CreateProjectRecordParams) (database.ProjectRecord, error)
+}
+
+type ProjectAPIKeyStore interface {
+	ListProjectAPIKeys(context.Context, string) ([]database.ProjectAPIKey, error)
+	CreateProjectAPIKey(context.Context, string, string, database.CreateProjectAPIKeyParams) (database.CreatedProjectAPIKey, error)
 }
 
 type Server struct {
@@ -50,6 +57,7 @@ type Server struct {
 	authStore     AuthStore
 	userStore     UserStore
 	dataStore     ProjectDataStore
+	apiKeyStore   ProjectAPIKeyStore
 }
 
 func NewServer(cfg config.Config, logger *slog.Logger, store interface {
@@ -58,6 +66,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	AuthStore
 	UserStore
 	ProjectDataStore
+	ProjectAPIKeyStore
 }) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -68,12 +77,14 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 	var authStore AuthStore
 	var userStore UserStore
 	var dataStore ProjectDataStore
+	var apiKeyStore ProjectAPIKeyStore
 	if store != nil {
 		healthChecker = store
 		projectStore = store
 		authStore = store
 		userStore = store
 		dataStore = store
+		apiKeyStore = store
 	}
 
 	server := &Server{
@@ -85,6 +96,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, store interface {
 		authStore:     authStore,
 		userStore:     userStore,
 		dataStore:     dataStore,
+		apiKeyStore:   apiKeyStore,
 	}
 	server.routes()
 
@@ -107,6 +119,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects", s.createProject)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/members", s.listProjectMembers)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/members", s.addProjectMember)
+	s.mux.HandleFunc("GET /v1/projects/{projectID}/api-keys", s.listProjectAPIKeys)
+	s.mux.HandleFunc("POST /v1/projects/{projectID}/api-keys", s.createProjectAPIKey)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/tables", s.listProjectTables)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/tables", s.createProjectTable)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/tables/{tableName}/records", s.listProjectRecords)
@@ -374,8 +388,58 @@ func (s *Server) addProjectMember(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, member)
 }
 
+func (s *Server) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireProjectRole(w, r, "owner", "admin", "developer")
+	if !ok {
+		return
+	}
+	if s.apiKeyStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	keys, err := s.apiKeyStore.ListProjectAPIKeys(r.Context(), r.PathValue("projectID"))
+	if err != nil {
+		s.logger.Error("list project api keys", "error", err)
+		writeError(w, http.StatusInternalServerError, "list project api keys")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"api_keys": keys})
+}
+
+func (s *Server) createProjectAPIKey(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireProjectRole(w, r, "owner", "admin", "developer")
+	if !ok {
+		return
+	}
+	if s.apiKeyStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	var input database.CreateProjectAPIKeyParams
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	key, err := s.apiKeyStore.CreateProjectAPIKey(r.Context(), r.PathValue("projectID"), user.User.ID, input)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.logger.Error("create project api key", "error", err)
+		writeError(w, http.StatusInternalServerError, "create project api key")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, key)
+}
+
 func (s *Server) listProjectTables(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireProjectMember(w, r)
+	_, ok := s.requireProjectMember(w, r)
 	if !ok {
 		return
 	}
@@ -390,13 +454,12 @@ func (s *Server) listProjectTables(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "list project tables")
 		return
 	}
-	_ = user
 
 	writeJSON(w, http.StatusOK, map[string]any{"tables": tables})
 }
 
 func (s *Server) createProjectTable(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireProjectRole(w, r, "owner", "admin", "developer")
+	_, ok := s.requireProjectRole(w, r, "owner", "admin", "developer")
 	if !ok {
 		return
 	}
@@ -421,13 +484,12 @@ func (s *Server) createProjectTable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "create project table")
 		return
 	}
-	_ = user
 
 	writeJSON(w, http.StatusCreated, table)
 }
 
 func (s *Server) listProjectRecords(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireProjectMember(w, r)
+	ok := s.requireTableAccess(w, r, "read")
 	if !ok {
 		return
 	}
@@ -442,13 +504,12 @@ func (s *Server) listProjectRecords(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "list project records")
 		return
 	}
-	_ = user
 
 	writeJSON(w, http.StatusOK, map[string]any{"records": records})
 }
 
 func (s *Server) createProjectRecord(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireProjectMember(w, r)
+	actor, ok := s.requireTableActor(w, r, "write")
 	if !ok {
 		return
 	}
@@ -463,7 +524,7 @@ func (s *Server) createProjectRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	record, err := s.dataStore.CreateProjectRecord(r.Context(), r.PathValue("projectID"), r.PathValue("tableName"), user.User.ID, input)
+	record, err := s.dataStore.CreateProjectRecord(r.Context(), r.PathValue("projectID"), r.PathValue("tableName"), actor.userID, input)
 	if err != nil {
 		if errors.Is(err, database.ErrInvalidInput) {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -475,6 +536,62 @@ func (s *Server) createProjectRecord(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, record)
+}
+
+type tableActor struct {
+	userID string
+}
+
+func (s *Server) requireTableAccess(w http.ResponseWriter, r *http.Request, operation string) bool {
+	_, ok := s.requireTableActor(w, r, operation)
+	return ok
+}
+
+func (s *Server) requireTableActor(w http.ResponseWriter, r *http.Request, operation string) (tableActor, bool) {
+	if s.dataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return tableActor{}, false
+	}
+
+	projectID := r.PathValue("projectID")
+	access, err := s.dataStore.GetProjectTableAccess(r.Context(), projectID, r.PathValue("tableName"))
+	if err != nil {
+		s.logger.Error("get project table access", "error", err)
+		writeError(w, http.StatusInternalServerError, "get project table access")
+		return tableActor{}, false
+	}
+
+	policy := access.ReadAccess
+	if operation == "write" {
+		policy = access.WriteAccess
+	}
+	if policy == "public" {
+		return tableActor{}, true
+	}
+
+	if policy == "api_key" && apiKeyToken(r) != "" {
+		token := apiKeyToken(r)
+		key, ok := s.authenticateProjectAPIKey(w, r, token)
+		if !ok {
+			return tableActor{}, false
+		}
+		if key.ProjectID != projectID {
+			writeError(w, http.StatusForbidden, "api key is not scoped to this project")
+			return tableActor{}, false
+		}
+		return tableActor{}, true
+	}
+
+	user, ok := s.requireAuth(w, r)
+	if !ok {
+		return tableActor{}, false
+	}
+	if !user.IsProjectMember(projectID) {
+		writeError(w, http.StatusForbidden, "project membership required")
+		return tableActor{}, false
+	}
+
+	return tableActor{userID: user.User.ID}, true
 }
 
 func (s *Server) requireProjectMember(w http.ResponseWriter, r *http.Request) (database.AuthUser, bool) {
@@ -527,12 +644,36 @@ func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) (database.A
 	return user, true
 }
 
+func (s *Server) authenticateProjectAPIKey(w http.ResponseWriter, r *http.Request, token string) (database.ProjectAPIKey, bool) {
+	if s.authStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return database.ProjectAPIKey{}, false
+	}
+
+	key, err := s.authStore.AuthenticateProjectAPIKey(r.Context(), token)
+	if err != nil {
+		if errors.Is(err, database.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "invalid api key")
+			return database.ProjectAPIKey{}, false
+		}
+		s.logger.Error("authenticate project api key", "error", err)
+		writeError(w, http.StatusInternalServerError, "authenticate project api key")
+		return database.ProjectAPIKey{}, false
+	}
+
+	return key, true
+}
+
 func bearerToken(header string) string {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+}
+
+func apiKeyToken(r *http.Request) string {
+	return strings.TrimSpace(r.Header.Get("X-Kuza-API-Key"))
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -9,17 +9,26 @@ import (
 )
 
 type ProjectTable struct {
-	ID        string          `json:"id"`
-	ProjectID string          `json:"project_id"`
-	Name      string          `json:"name"`
-	Schema    json.RawMessage `json:"schema"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID          string          `json:"id"`
+	ProjectID   string          `json:"project_id"`
+	Name        string          `json:"name"`
+	Schema      json.RawMessage `json:"schema"`
+	ReadAccess  string          `json:"read_access"`
+	WriteAccess string          `json:"write_access"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 type CreateProjectTableParams struct {
-	Name   string          `json:"name"`
-	Schema json.RawMessage `json:"schema"`
+	Name        string          `json:"name"`
+	Schema      json.RawMessage `json:"schema"`
+	ReadAccess  string          `json:"read_access"`
+	WriteAccess string          `json:"write_access"`
+}
+
+type ProjectTableAccess struct {
+	ReadAccess  string
+	WriteAccess string
 }
 
 type ProjectRecord struct {
@@ -38,7 +47,7 @@ type CreateProjectRecordParams struct {
 
 func (db *DB) ListProjectTables(ctx context.Context, projectID string) ([]ProjectTable, error) {
 	rows, err := db.pool.Query(ctx, `
-		SELECT id, project_id, name, schema, created_at, updated_at
+		SELECT id, project_id, name, schema, read_access, write_access, created_at, updated_at
 		FROM project_tables
 		WHERE project_id = $1
 		ORDER BY name ASC
@@ -51,7 +60,7 @@ func (db *DB) ListProjectTables(ctx context.Context, projectID string) ([]Projec
 	tables := []ProjectTable{}
 	for rows.Next() {
 		var table ProjectTable
-		if err := rows.Scan(&table.ID, &table.ProjectID, &table.Name, &table.Schema, &table.CreatedAt, &table.UpdatedAt); err != nil {
+		if err := rows.Scan(&table.ID, &table.ProjectID, &table.Name, &table.Schema, &table.ReadAccess, &table.WriteAccess, &table.CreatedAt, &table.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan project table: %w", err)
 		}
 		tables = append(tables, table)
@@ -71,20 +80,24 @@ func (db *DB) CreateProjectTable(ctx context.Context, projectID string, input Cr
 	if len(input.Schema) == 0 {
 		input.Schema = json.RawMessage(`{}`)
 	}
+	input.ReadAccess = normalizeTableAccess(input.ReadAccess)
+	input.WriteAccess = normalizeTableAccess(input.WriteAccess)
 	if !json.Valid(input.Schema) {
 		return ProjectTable{}, fmt.Errorf("%w: schema must be valid json", ErrInvalidInput)
 	}
 
 	var table ProjectTable
 	if err := db.pool.QueryRow(ctx, `
-		INSERT INTO project_tables (project_id, name, schema)
-		VALUES ($1, $2, $3)
-		RETURNING id, project_id, name, schema, created_at, updated_at
-	`, projectID, input.Name, input.Schema).Scan(
+		INSERT INTO project_tables (project_id, name, schema, read_access, write_access)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, project_id, name, schema, read_access, write_access, created_at, updated_at
+	`, projectID, input.Name, input.Schema, input.ReadAccess, input.WriteAccess).Scan(
 		&table.ID,
 		&table.ProjectID,
 		&table.Name,
 		&table.Schema,
+		&table.ReadAccess,
+		&table.WriteAccess,
 		&table.CreatedAt,
 		&table.UpdatedAt,
 	); err != nil {
@@ -92,6 +105,19 @@ func (db *DB) CreateProjectTable(ctx context.Context, projectID string, input Cr
 	}
 
 	return table, nil
+}
+
+func (db *DB) GetProjectTableAccess(ctx context.Context, projectID, tableName string) (ProjectTableAccess, error) {
+	var access ProjectTableAccess
+	if err := db.pool.QueryRow(ctx, `
+		SELECT read_access, write_access
+		FROM project_tables
+		WHERE project_id = $1
+		  AND name = $2
+	`, projectID, tableName).Scan(&access.ReadAccess, &access.WriteAccess); err != nil {
+		return ProjectTableAccess{}, fmt.Errorf("query project table access: %w", err)
+	}
+	return access, nil
 }
 
 func (db *DB) ListProjectRecords(ctx context.Context, projectID, tableName string) ([]ProjectRecord, error) {
@@ -137,6 +163,15 @@ func (db *DB) ListProjectRecords(ctx context.Context, projectID, tableName strin
 	return records, nil
 }
 
+func normalizeTableAccess(access string) string {
+	switch strings.TrimSpace(access) {
+	case "api_key", "public":
+		return strings.TrimSpace(access)
+	default:
+		return "project_members"
+	}
+}
+
 func (db *DB) CreateProjectRecord(ctx context.Context, projectID, tableName, createdByUserID string, input CreateProjectRecordParams) (ProjectRecord, error) {
 	tableName = strings.TrimSpace(tableName)
 	if projectID == "" || tableName == "" {
@@ -147,6 +182,10 @@ func (db *DB) CreateProjectRecord(ctx context.Context, projectID, tableName, cre
 	}
 	if !json.Valid(input.Data) {
 		return ProjectRecord{}, fmt.Errorf("%w: data must be valid json", ErrInvalidInput)
+	}
+	var createdBy *string
+	if strings.TrimSpace(createdByUserID) != "" {
+		createdBy = &createdByUserID
 	}
 
 	var record ProjectRecord
@@ -161,7 +200,7 @@ func (db *DB) CreateProjectRecord(ctx context.Context, projectID, tableName, cre
 		SELECT $1, table_ref.id, $3, $4
 		FROM table_ref
 		RETURNING id, project_id, table_id, data, created_by_user_id, created_at, updated_at
-	`, projectID, tableName, input.Data, createdByUserID).Scan(
+	`, projectID, tableName, input.Data, createdBy).Scan(
 		&record.ID,
 		&record.ProjectID,
 		&record.TableID,

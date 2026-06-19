@@ -9,6 +9,8 @@ The first platform modules are:
 - Identity: users, sessions, roles, memberships.
 - Projects: the app and tenant boundary for data ownership.
 - Project data: generic tables and JSON records owned by a project.
+- Project API keys: frontend/server keys scoped to a single project.
+- Table policies: `project_members`, `api_key`, or `public` access for reads/writes.
 - Storage: S3-compatible file metadata and object storage.
 - Audit: trace important changes and admin activity.
 
@@ -21,6 +23,7 @@ The platform path is protected by a few early choices:
 - PostgreSQL is the source of truth.
 - Every app record belongs to a project boundary.
 - Generic project APIs sit in front of the database.
+- Frontends use project API keys instead of human owner session tokens.
 - Storage is S3-compatible so local MinIO and hosted object stores are interchangeable.
 - Operational concerns like audit logs, backups, and health checks are built early.
 
