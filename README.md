@@ -74,7 +74,7 @@ curl -X POST http://localhost:8080/v1/projects/<project-id>/api-keys \
 curl -X POST http://localhost:8080/v1/projects/<project-id>/tables \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
-  -d '{"name":"profiles","read_access":"api_key","write_access":"api_key","schema":{"fields":{"name":"text","headline":"text"}}}'
+  -d '{"name":"profiles","read_access":"api_key","write_access":"api_key","schema":{"required":["name"],"fields":{"name":"text","headline":"text"}}}'
 
 curl -X POST http://localhost:8080/v1/projects/<project-id>/tables/profiles/records \
   -H 'X-Kuza-API-Key: <api-key>' \
@@ -83,6 +83,14 @@ curl -X POST http://localhost:8080/v1/projects/<project-id>/tables/profiles/reco
 
 curl http://localhost:8080/v1/projects/<project-id>/tables/profiles/records \
   -H 'X-Kuza-API-Key: <api-key>'
+
+curl -X PATCH http://localhost:8080/v1/projects/<project-id>/tables/profiles/records/<record-id> \
+  -H 'X-Kuza-API-Key: <api-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"name":"Ian","headline":"Founder"}}'
+
+curl -X DELETE http://localhost:8080/v1/projects/<project-id>/tables/profiles/records/<record-id> \
+  -H 'X-Kuza-API-Key: <api-key>'
 ```
 
 Project table access policies are:
@@ -90,6 +98,11 @@ Project table access policies are:
 - `project_members`: project members only.
 - `api_key`: project members or a project API key.
 - `public`: no token required.
+
+Project table schemas currently support:
+
+- `required`: list of required field names.
+- `fields`: map of field names to simple types: `text`, `number`, `boolean`, `object`, or `array`.
 
 If `KUZA_CORE_DATABASE_URL` is set, the API connects to PostgreSQL, runs embedded migrations, and can bootstrap the first owner account from:
 
@@ -118,4 +131,4 @@ docs/                 architecture and roadmap notes
 
 ## Current Status
 
-This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, and generic project data tables/records. Storage and finer validation come next.
+This is the foundation slice: API skeleton, health/readiness routes, deployment shape, PostgreSQL connection, embedded migrations, first-owner bootstrap, bearer sessions, project APIs, users, memberships, API keys, table policies, generic project data tables/records, record update/delete, and basic schema validation. Storage and richer permissions come next.

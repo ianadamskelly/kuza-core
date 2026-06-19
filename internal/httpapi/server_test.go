@@ -134,6 +134,19 @@ func (store fakeStore) CreateProjectRecord(_ context.Context, projectID, _ strin
 	}, nil
 }
 
+func (store fakeStore) UpdateProjectRecord(_ context.Context, projectID, _ string, recordID string, input database.UpdateProjectRecordParams) (database.ProjectRecord, error) {
+	return database.ProjectRecord{
+		ID:        recordID,
+		ProjectID: projectID,
+		TableID:   "table_1",
+		Data:      input.Data,
+	}, nil
+}
+
+func (store fakeStore) DeleteProjectRecord(context.Context, string, string, string) error {
+	return nil
+}
+
 func (store fakeStore) ListProjectAPIKeys(context.Context, string) ([]database.ProjectAPIKey, error) {
 	return store.apiKeys, nil
 }
@@ -563,6 +576,37 @@ func TestCreateProjectRecord(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestUpdateProjectRecord(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{User: database.User{ID: "user_1"}, Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+	})
+	body := bytes.NewBufferString(`{"data":{"name":"Ian","headline":"Founder"}}`)
+	req := httptest.NewRequest(http.MethodPatch, "/v1/projects/project_1/tables/profiles/records/record_1", body)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestDeleteProjectRecord(t *testing.T) {
+	handler := NewServer(config.Config{}, slog.Default(), fakeStore{
+		authUser: database.AuthUser{User: database.User{ID: "user_1"}, Memberships: []database.Membership{{ProjectID: "project_1", Role: "member"}}},
+	})
+	req := httptest.NewRequest(http.MethodDelete, "/v1/projects/project_1/tables/profiles/records/record_1", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, rec.Code)
 	}
 }
 

@@ -41,6 +41,8 @@ type ProjectDataStore interface {
 	GetProjectTableAccess(context.Context, string, string) (database.ProjectTableAccess, error)
 	ListProjectRecords(context.Context, string, string) ([]database.ProjectRecord, error)
 	CreateProjectRecord(context.Context, string, string, string, database.CreateProjectRecordParams) (database.ProjectRecord, error)
+	UpdateProjectRecord(context.Context, string, string, string, database.UpdateProjectRecordParams) (database.ProjectRecord, error)
+	DeleteProjectRecord(context.Context, string, string, string) error
 }
 
 type ProjectAPIKeyStore interface {
@@ -125,6 +127,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/tables", s.createProjectTable)
 	s.mux.HandleFunc("GET /v1/projects/{projectID}/tables/{tableName}/records", s.listProjectRecords)
 	s.mux.HandleFunc("POST /v1/projects/{projectID}/tables/{tableName}/records", s.createProjectRecord)
+	s.mux.HandleFunc("PATCH /v1/projects/{projectID}/tables/{tableName}/records/{recordID}", s.updateProjectRecord)
+	s.mux.HandleFunc("DELETE /v1/projects/{projectID}/tables/{tableName}/records/{recordID}", s.deleteProjectRecord)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -536,6 +540,59 @@ func (s *Server) createProjectRecord(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, record)
+}
+
+func (s *Server) updateProjectRecord(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireTableActor(w, r, "write")
+	if !ok {
+		return
+	}
+	if s.dataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	var input database.UpdateProjectRecordParams
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	record, err := s.dataStore.UpdateProjectRecord(r.Context(), r.PathValue("projectID"), r.PathValue("tableName"), r.PathValue("recordID"), input)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.logger.Error("update project record", "error", err)
+		writeError(w, http.StatusInternalServerError, "update project record")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, record)
+}
+
+func (s *Server) deleteProjectRecord(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireTableActor(w, r, "write")
+	if !ok {
+		return
+	}
+	if s.dataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	if err := s.dataStore.DeleteProjectRecord(r.Context(), r.PathValue("projectID"), r.PathValue("tableName"), r.PathValue("recordID")); err != nil {
+		if errors.Is(err, database.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.logger.Error("delete project record", "error", err)
+		writeError(w, http.StatusInternalServerError, "delete project record")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type tableActor struct {

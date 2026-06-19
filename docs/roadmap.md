@@ -29,8 +29,8 @@
 - Project JSON records. Done.
 - Project API keys. Done.
 - Basic table read/write access policies. Done.
-- Record update/delete APIs.
-- Field validation from table schema.
+- Record update/delete APIs. Done.
+- Basic field validation from table schema. Done.
 - File upload flow using S3-compatible storage.
 - Audit events for sensitive actions.
 
